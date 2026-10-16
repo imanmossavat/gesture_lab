@@ -87,12 +87,57 @@ The game now uses a physics-informed adaptive controller instead of fixed speed 
 
 - `d` is a normalised difficulty in `[0, 1]`.
 - Speed, obstacle height/width, and spawn interval are derived from `d`.
-- The controller targets a 75% success rate:
-  `d <- clip(d + 0.08 * (outcome - 0.75))`
+- The controller targets a 75% success rate with an optional momentum term:
+  `v <- MOMENTUM*v + ADAPTATION_RATE*(outcome - TARGET)`
+  `d <- clip(d + v)`
+- `MOMENTUM` defaults to `0.0`, which gives the old memoryless update. When
+  `MOMENTUM > 0` the controller keeps a velocity term, smoothing streaks of
+  successes/failures. Velocity is zeroed when `d` clips against a bound or
+  when the game resets.
 - A minimum physical gap rule guarantees every spawned obstacle is theoretically
   jumpable, even at maximum difficulty.
 
 See `DEV.md` for the full design, tuning notes, and formulas.
+
+## Momentum tuning
+
+You can add momentum to the adaptive update from the command line.
+
+### Game
+
+```bash
+python game.py --momentum 0.5
+```
+
+### Dev bench
+
+```bash
+python dev_bench.py simulate --frames 2000 --momentum 0.5
+python dev_bench.py compare --momentum 0.8 --adaptation-rate 0.02
+python dev_bench.py latency-report --max-latency 200 --momentum 0.5
+```
+
+### Typical values
+
+| Momentum | Feeling | Recommended use |
+|---|---|---|
+| `0.0` (default) | Instant reaction to every outcome. | Baseline; matches the original behaviour. |
+| `0.3` | Slight smoothing. | Noisy players; keeps the controller from overreacting to one lucky/unlucky obstacle. |
+| `0.5` | Moderate smoothing. | Good starting point if the default update feels jumpy. |
+| `0.8` | Strong smoothing. | Long streaks drive large moves; pair with a reduced `--adaptation-rate` (e.g. 0.02 instead of 0.08). |
+
+### How to pick a value
+
+1. Start with the default (`0.0`). If difficulty darts around too much, raise
+   momentum a little (e.g. `0.3`).
+2. Increase only if you still see oscillation. Higher momentum amplifies streaks,
+   which can overshoot the target success rate.
+3. Because momentum and adaptation rate are independent, high momentum usually
+   works better with a smaller adaptation rate. A common rule of thumb is to
+   divide the base rate by roughly `1 / (1 - MOMENTUM)`; for `0.8` momentum the
+   bench uses about one-fifth of the default rate.
+4. Validate with the bench:
+   `python dev_bench.py compare --momentum <x> --adaptation-rate <y>`.
 
 ## Difficulty presets
 
