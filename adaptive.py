@@ -5,6 +5,7 @@ the dev bench, and the tests.
 """
 from __future__ import annotations
 
+import copy
 import math
 import random
 import statistics
@@ -22,26 +23,26 @@ class Config:
     must be treated as guesses until they are validated with real players.
     """
 
-    # World / player geometry (pixels)
+    # World / player geometry (px)
     PLAYER_X: float = 620.0
     PLAYER_WIDTH: float = 42.0
     PLAYER_HEIGHT: float = 56.0
     GROUND_Y: float = 590.0
-    SPAWN_X: float = 1190.0  # WIDTH + 10 from game.py
+    SPAWN_X: float = 1190.0  # WIDTH + 10 from game.py (px)
 
     # Physics constants -- measured from the existing game file.
-    GRAVITY: float = 1800.0
-    JUMP_VELOCITY: float = -690.0
+    GRAVITY: float = 1800.0          # px/s^2 (downward positive)
+    JUMP_VELOCITY: float = -690.0     # px/s (upward negative)
 
     # Difficulty profile -- theoretical mapping from d to game parameters.
-    SPEED_MIN: float = 260.0
-    SPEED_MAX: float = 430.0  # 260 + 170
-    HEIGHT_MIN: float = 30.0
-    HEIGHT_MAX: float = 70.0  # 30 + 40
-    WIDTH_MIN: float = 20.0
-    WIDTH_MAX: float = 35.0  # 20 + 15
-    SPAWN_INTERVAL_BASE_AT_D0: float = 2.5
-    SPAWN_INTERVAL_BASE_AT_D1: float = 1.3  # 2.5 - 1.2
+    SPEED_MIN: float = 260.0          # px/s
+    SPEED_MAX: float = 430.0          # px/s (260 + 170)
+    HEIGHT_MIN: float = 30.0          # px
+    HEIGHT_MAX: float = 70.0          # px (30 + 40)
+    WIDTH_MIN: float = 20.0           # px
+    WIDTH_MAX: float = 35.0           # px (20 + 15)
+    SPAWN_INTERVAL_BASE_AT_D0: float = 2.5   # s
+    SPAWN_INTERVAL_BASE_AT_D1: float = 1.3   # s (2.5 - 1.2)
 
     # Spawn interval jitter -- multiplicative, only ever lengthens the interval.
     SPAWN_INTERVAL_JITTER: tuple[float, float] = (1.0, 1.3)
@@ -64,11 +65,42 @@ class Config:
     RECENT_WINDOW: int = 200
 
     # Minimum gap -- theoretical safety margin.
-    LANDING_MARGIN_S: float = 0.35
-    MIN_GAP_FLOOR_PX: float = 350.0
+    LANDING_MARGIN_S: float = 0.35    # s
+    MIN_GAP_FLOOR_PX: float = 350.0   # px
 
     # Latency diagnostics
     LATENCY_WINDOW: int = 200
+
+
+# Presets only affect the starting d, classifier threshold, stability
+# requirement, and UI colour.  All runtime parameters come from
+# difficulty_profile(d).
+PRESETS = {
+    1: {"d": 0.25, "threshold": 0.50, "stability": 1, "color": (120, 220, 120)},
+    2: {"d": 0.50, "threshold": 0.60, "stability": 2, "color": (255, 200, 90)},
+    3: {"d": 0.75, "threshold": 0.70, "stability": 3, "color": (255, 110, 110)},
+}
+
+
+def build_presets(start_d=None, preset_id=2, base=PRESETS):
+    """Return a deep copy of PRESETS with an optional initial-d override."""
+    presets = copy.deepcopy(base)
+    if start_d is not None:
+        presets[preset_id]["d"] = start_d
+    return presets
+
+
+# CSV column order used by game.py --log-outcomes and dev_bench.py.
+OUTCOME_HEADER = [
+    "t_s", "player", "session", "mode", "d_spawn", "d_after",
+    "speed", "height", "width", "outcome",
+]
+
+# CSV column order used by game.py --log-latency.
+LATENCY_HEADER = [
+    "frame_read_to_jump_ms", "first_open_to_jump_ms",
+    "inference_ms", "loop_ms", "accepted",
+]
 
 
 class DifficultyProfile(NamedTuple):
@@ -252,8 +284,6 @@ def randomize_height(
     cfg = config or Config()
     j = cfg.HEIGHT_JITTER
     return profile.height * rng.uniform(1.0 - j, 1.0 + j)
-
-
 
 
 def try_spawn(
@@ -488,7 +518,6 @@ class LatencyTracker:
         if len(self.values) < 2:
             return 0.0
         return statistics.stdev(self.values)
-
 
 
 class SessionTracker:

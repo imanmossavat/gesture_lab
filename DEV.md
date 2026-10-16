@@ -17,12 +17,8 @@ to tune it.
 
 `d` is a normalized scalar in `[0, 1]`.
 
-```text
-speed = 260 + 170*d
-height = 30 + 40*d
-width  = 20 + 15*d
-spawn_interval = 2.5 - 1.2*d
-```
+The mapping is implemented in `adaptive.difficulty_profile` and configured by
+`adaptive.Config`.  Run `python dev_bench.py report` to see the current values.
 
 Height is jittered ±10% at spawn time.  Width is **not** jittered because the
 timing window depends on the horizontal overlap `(w + PLAYER_WIDTH) / speed`,
@@ -33,33 +29,19 @@ only ever lengthens the base interval.
 
 ## Physics helpers
 
-The jump parabola is derived from the constants measured in the existing game:
-
-```text
-GRAVITY       = 1800 px/s^2
-JUMP_VELOCITY = -690 px/s
-```
-
-`time_above(h)` returns the duration during a jump when the player's feet are
-at least `h` pixels above the ground.  `timing_window(h, w, speed)` subtracts
-the horizontal overlap duration `(w + PLAYER_WIDTH) / speed` from
-`time_above(h)`.
-
-A perfect-timed jump clears the obstacle when `timing_window > 0`.  The usable
-timing budget is half of that margin (`clears_obstacle`).
+The jump parabola is derived from `Config.GRAVITY` and `Config.JUMP_VELOCITY`.
+Use `air_time()`, `jump_peak()`, `apex_time()`, and `time_above(h)` to inspect
+it.  `timing_window(h, w, speed)` subtracts the horizontal overlap duration
+from `time_above(h)`.  A perfect-timed jump clears the obstacle when
+`timing_window > 0`; the usable timing budget is half of that margin
+(`clears_obstacle`).
 
 ## Controller
 
-```text
-d <- clip(d + 0.08 * (outcome - 0.75))
-```
-
-- success (outcome = 1): `d += +0.02`
-- failure (outcome = 0): `d += -0.06`
-
-The target success rate is 75%.  The controller is intentionally asymmetric:
-it recovers faster from being too hard than it drifts upward, which prevents
-catastrophic death spirals.
+The update is implemented in `AdaptiveController.update` and is controlled by
+`Config.ADAPTATION_RATE`, `Config.TARGET_SUCCESS_RATE`, and `Config.MOMENTUM`.
+Run `python dev_bench.py report` to see the per-outcome deltas and the
+long-run gain when momentum is enabled.
 
 `controller.recent` is a diagnostic window only; it does **not** drive the
 update.
@@ -68,17 +50,10 @@ update.
 
 When the spawn timer expires, `try_spawn` checks the physical gap from the
 previous obstacle's right edge to the new obstacle's left edge at spawn time.
-
-```text
-required_gap_px = max(350, speed * (AIR_TIME + 0.35))
-```
-
-- `AIR_TIME` is the total jump air time (~0.767 s).
-- `0.35 s` is a landing margin before the next jump must be attempted.
-- The 350 px floor prevents the rule from collapsing at low difficulty.
-
-If the gap is too small, `try_spawn` returns `None` and the caller retries on
-the next frame.  Off-screen obstacles are ignored for spacing.
+The required gap is computed by `spawn_allowed` from `Config.MIN_GAP_FLOOR_PX`,
+`Config.LANDING_MARGIN_S`, and `air_time()`.  If the gap is too small,
+`try_spawn` returns `None` and the caller retries on the next frame.
+Off-screen obstacles are ignored for spacing.
 
 ## Outcome resolution
 
@@ -158,6 +133,7 @@ SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120
 
 # Tune the difficulty model
 python dev_bench.py feasibility
+python dev_bench.py report
 python dev_bench.py sweep
 python dev_bench.py simulate --frames 2000 --noise 80 --latency 90 --csv simulate.csv
 python dev_bench.py compare --output compare.png --csv compare.csv

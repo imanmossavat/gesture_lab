@@ -9,7 +9,6 @@ Controls:
     Q / Esc    : quit
 """
 import argparse
-import copy
 import csv
 import dataclasses
 import datetime
@@ -25,9 +24,13 @@ import pygame
 from adaptive import (
     AdaptiveController,
     Config,
+    LATENCY_HEADER,
+    OUTCOME_HEADER,
     LatencyTracker,
+    PRESETS,
     SessionTracker,
     attempt_jump,
+    build_presets,
     difficulty_profile,
     next_spawn_timer,
     resolve_obstacles,
@@ -39,24 +42,6 @@ WIDTH, HEIGHT = 1180, 720
 CAM_W, CAM_H = 480, 360
 FPS_TARGET = 60
 
-# Presets only affect the starting d, the classifier threshold, the stability
-# requirement, and the UI colour.  All runtime parameters come from
-# difficulty_profile(d).
-# The initial preset and its starting d can be overridden from the command line
-# with --preset and --start-d.
-PRESETS = {
-    1: {"d": 0.25, "threshold": 0.50, "stability": 1, "color": (120, 220, 120)},
-    2: {"d": 0.50, "threshold": 0.60, "stability": 2, "color": (255, 200, 90)},
-    3: {"d": 0.75, "threshold": 0.70, "stability": 3, "color": (255, 110, 110)},
-}
-
-
-def build_presets(start_d=None, preset_id=2, base=PRESETS):
-    """Return a deep copy of PRESETS with an optional initial-d override."""
-    presets = copy.deepcopy(base)
-    if start_d is not None:
-        presets[preset_id]["d"] = start_d
-    return presets
 
 
 def _git_hash():
@@ -88,12 +73,12 @@ class GameState:
         self.controller = controller
         self.config = config
         self.presets = presets if presets is not None else PRESETS
-        self.ground_y = 590
-        self.player_x = 620
-        self.player_w = 42
-        self.player_h = 56
-        self.gravity = 1800.0
-        self.jump_velocity = -690.0
+        self.ground_y = config.GROUND_Y
+        self.player_x = config.PLAYER_X
+        self.player_w = config.PLAYER_WIDTH
+        self.player_h = config.PLAYER_HEIGHT
+        self.gravity = config.GRAVITY
+        self.jump_velocity = config.JUMP_VELOCITY
         self.tracker = SessionTracker()
         self.game_start = time.perf_counter()
         self.preset_id = start_preset
@@ -337,7 +322,7 @@ def main():
         )
         latency_writer = csv.writer(latency_log)
         latency_writer.writerow(
-            ["frame_read_to_jump_ms", "first_open_to_jump_ms", "inference_ms", "loop_ms", "accepted"]
+            LATENCY_HEADER
         )
     else:
         latency_writer = None
@@ -357,7 +342,7 @@ def main():
         )
         outcomes_writer = csv.writer(outcomes_log)
         outcomes_writer.writerow(
-            ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+            OUTCOME_HEADER
         )
 
     valid_gestures = 0

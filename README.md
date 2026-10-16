@@ -14,7 +14,7 @@ No model training is required. The classifier is a small set of hand-written rul
 ## What students learn
 
 - A pretrained model (MediaPipe Hands) gives us 21 landmark points.
-- Those points are normalised so the classifier is less sensitive to hand position and size.
+- Those points can be normalised into a 63-number feature vector; the rule classifier uses raw landmarks.
 - A rule-based classifier decides whether fingers are extended.
 - A score is not the same as guaranteed correctness.
 - Difficulty can be driven by physics and a target success rate.
@@ -83,61 +83,13 @@ Preset changes (**1/2/3**) and restarts (**R**) also start a new session: obstac
 
 ## Adaptive difficulty
 
-The game now uses a physics-informed adaptive controller instead of fixed speed tiers.
+`d` is a normalised difficulty in `[0, 1]`.  Speed, obstacle geometry, and spawn
+interval are derived from `d` by `adaptive.difficulty_profile`.  The
+`AdaptiveController` targets `Config.TARGET_SUCCESS_RATE` and supports optional
+momentum; see `adaptive.py` and `python dev_bench.py report` for the exact
+numbers.  A minimum physical gap rule guarantees every spawned obstacle is
+theoretically jumpable.
 
-- `d` is a normalised difficulty in `[0, 1]`.
-- Speed, obstacle height/width, and spawn interval are derived from `d`.
-- The controller targets a 75% success rate with an optional momentum term:
-  `v <- MOMENTUM*v + ADAPTATION_RATE*(outcome - TARGET)`
-  `d <- clip(d + v)`
-- `MOMENTUM` defaults to `0.0`, which gives the old memoryless update. When
-  `MOMENTUM > 0` the controller keeps a velocity term, smoothing streaks of
-  successes/failures. Velocity is zeroed when `d` clips against a bound or
-  when the game resets.
-- A minimum physical gap rule guarantees every spawned obstacle is theoretically
-  jumpable, even at maximum difficulty.
-
-See `DEV.md` for the full design, tuning notes, and formulas.
-
-## Momentum tuning
-
-You can add momentum to the adaptive update from the command line.
-
-### Game
-
-```bash
-python game.py --momentum 0.5
-```
-
-### Dev bench
-
-```bash
-python dev_bench.py simulate --frames 2000 --momentum 0.5
-python dev_bench.py compare --momentum 0.8 --adaptation-rate 0.02
-python dev_bench.py latency-report --max-latency 200 --momentum 0.5
-```
-
-### Typical values
-
-| Momentum | Feeling | Recommended use |
-|---|---|---|
-| `0.0` (default) | Instant reaction to every outcome. | Baseline; matches the original behaviour. |
-| `0.3` | Slight smoothing. | Noisy players; keeps the controller from overreacting to one lucky/unlucky obstacle. |
-| `0.5` | Moderate smoothing. | Good starting point if the default update feels jumpy. |
-| `0.8` | Strong smoothing. | Long streaks drive large moves; pair with a reduced `--adaptation-rate` (e.g. 0.02 instead of 0.08). |
-
-### How to pick a value
-
-1. Start with the default (`0.0`). If difficulty darts around too much, raise
-   momentum a little (e.g. `0.3`).
-2. Increase only if you still see oscillation. Higher momentum amplifies streaks,
-   which can overshoot the target success rate.
-3. Because momentum and adaptation rate are independent, high momentum usually
-   works better with a smaller adaptation rate. A common rule of thumb is to
-   divide the base rate by roughly `1 / (1 - MOMENTUM)`; for `0.8` momentum the
-   bench uses about one-fifth of the default rate.
-4. Validate with the bench:
-   `python dev_bench.py compare --momentum <x> --adaptation-rate <y>`.
 
 ## Difficulty presets
 
@@ -203,6 +155,7 @@ SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 500 --log-lat
 
 ```bash
 python dev_bench.py feasibility
+python dev_bench.py report
 python dev_bench.py sweep
 python dev_bench.py simulate --frames 2000 --noise 80 --latency 90
 python dev_bench.py compare --output compare.png
@@ -226,7 +179,7 @@ The notebook covers:
 
 1. Opening the webcam and capturing a frame.
 2. Detecting and drawing the 21 MediaPipe landmarks.
-3. Normalising landmarks: translating the wrist to the origin and scaling by hand size.
+3. Normalising landmarks into an optional 63-number feature vector (the rule classifier uses raw landmarks).
 4. Building a 63-number feature vector.
 5. How the rule-based classifier decides between open, fist, and custom.
 6. The effect of the confidence threshold.
@@ -253,6 +206,7 @@ pytest -q
 - `gesture_landmarks_lab.ipynb` — educational notebook.
 - `tests/` — pytest tests.
 - `requirements.txt` — Python dependencies.
+- `AGENTS.md` — slow-changing reference for agents / contributors.
 - `DEV.md` — developer / tuning guide.
 - `README.md` — this file.
 

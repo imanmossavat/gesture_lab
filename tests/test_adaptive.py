@@ -14,8 +14,11 @@ import pytest
 from adaptive import (
     AdaptiveController,
     Config,
+    LATENCY_HEADER,
     LatencyTracker,
     Obstacle,
+    OUTCOME_HEADER,
+    PRESETS,
     SessionTracker,
     air_time,
     attempt_jump,
@@ -466,7 +469,7 @@ def test_game_outcomes_csv_and_analyze(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     text = out.read_text()
-    header = "t_s,player,session,mode,d_spawn,d_after,speed,height,width,outcome"
+    header = ",".join(OUTCOME_HEADER)
     assert header in text, text[:200]
     for key in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
                 "initial_preset", "git_hash", "timestamp"):
@@ -498,7 +501,7 @@ def test_session_tracker_increments_monotonically():
 def test_analyze_per_session_and_combined_summary(tmp_path):
     """analyze.py splits by session and reports tail/settling per session."""
     csv_path = tmp_path / "two_sessions.csv"
-    header = ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+    header = OUTCOME_HEADER
     rows = []
     # Session 1: d stays near 0.5, all successes -> should settle from obstacle #0.
     for i in range(20):
@@ -555,7 +558,8 @@ def test_analyze_per_session_and_combined_summary(tmp_path):
 
 def test_preset_change_clears_obstacles():
     """A preset change must start a new session with no leftover obstacles."""
-    from game import GameState, PRESETS
+    from game import GameState
+    from adaptive import PRESETS
     from adaptive import AdaptiveController, Config, Obstacle
 
     config = Config()
@@ -580,11 +584,31 @@ def test_preset_change_clears_obstacles():
     assert state.stability == PRESETS[3]["stability"]
 
 
+def test_game_state_uses_config_geometry():
+    """GameState geometry/physics must come from the passed Config."""
+    from game import GameState
+    from adaptive import AdaptiveController, Config
+
+    cfg = Config(
+        PLAYER_X=111.0, PLAYER_WIDTH=22.0, PLAYER_HEIGHT=33.0,
+        GROUND_Y=444.0, GRAVITY=1234.0, JUMP_VELOCITY=-555.0,
+    )
+    controller = AdaptiveController(cfg)
+    state = GameState(controller, cfg)
+    assert state.player_x == cfg.PLAYER_X
+    assert state.player_w == cfg.PLAYER_WIDTH
+    assert state.player_h == cfg.PLAYER_HEIGHT
+    assert state.ground_y == cfg.GROUND_Y
+    assert state.gravity == cfg.GRAVITY
+    assert state.jump_velocity == cfg.JUMP_VELOCITY
+    assert state.player_y == cfg.GROUND_Y - cfg.PLAYER_HEIGHT
+
+
 def test_analyze_multi_session_plot(tmp_path):
     """analyze.py --plot writes one PNG per session for multi-session files."""
     matplotlib = pytest.importorskip("matplotlib")
     csv_path = tmp_path / "two_sessions.csv"
-    header = ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+    header = OUTCOME_HEADER
     rows = []
     # Session 1: varying d across bins, mixed outcomes.
     for i in range(25):
@@ -635,7 +659,7 @@ def test_dev_bench_simulate_writes_metadata(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     text = csv_path.read_text()
-    assert "t_s,player,session,mode,d_spawn,d_after,speed,height,width,outcome" in text
+    assert ",".join(OUTCOME_HEADER) in text
     for key in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "seed", "noise_ms",
                 "latency_jitter_ms", "miss_prob", "git_hash", "timestamp"):
         assert f"# {key}=" in text, key
@@ -697,3 +721,72 @@ def test_simulate_returns_obstacle_rows():
     assert all(r["outcome"] in (0, 1) for r in rows)
     assert all("d_spawn" in r and "d_after" in r for r in rows)
     assert controller.outcomes == 50
+
+
+# ---------------------------------------------------------------------------
+# Spec-pinning tests
+# ---------------------------------------------------------------------------
+
+def test_readme_presets_match_code():
+    """README difficulty-preset table must match adaptive.PRESETS."""
+    import re
+
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+    table_match = re.search(
+        r"## Difficulty presets\s*\n\|[^\n]*\|\n\|[-:| ]+\|\n(.*?)(?=\n##|\Z)",
+        readme,
+        re.DOTALL,
+    )
+    assert table_match, "Could not find preset table in README"
+    name_to_id = {"easy": 1, "normal": 2, "hard": 3}
+    parsed = {}
+    for line in table_match.group(1).strip().splitlines():
+        parts = [p.strip() for p in line.split("|") if p.strip()]
+        if len(parts) != 4:
+            continue
+        name, d, stability, threshold = parts
+        pid = name_to_id[name.lower()]
+        parsed[pid] = {
+            "d": float(d),
+            "stability": int(stability),
+            "threshold": float(threshold),
+        }
+    for pid in (1, 2, 3):
+        assert parsed[pid]["d"] == PRESETS[pid]["d"]
+        assert parsed[pid]["stability"] == PRESETS[pid]["stability"]
+        assert parsed[pid]["threshold"] == PRESETS[pid]["threshold"]
+
+
+def test_dev_bench_simulate_header_matches_constant(tmp_path):
+    """dev_bench simulate --csv writes the exact OUTCOME_HEADER columns."""
+    csv_path = tmp_path / "rep.csv"
+    result = subprocess.run(
+        ["python", "dev_bench.py", "simulate", "--frames", "10", "--csv", str(csv_path)],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = csv_path.read_text().splitlines()
+    header_line = next(line for line in lines if not line.startswith("#"))
+    assert header_line == ",".join(OUTCOME_HEADER)
+
+
+def test_game_latency_header_matches_constant(tmp_path):
+    """game.py --log-latency writes the exact LATENCY_HEADER columns."""
+    pytest.importorskip("pygame")
+    out = tmp_path / "lat.csv"
+    env = os.environ.copy()
+    env["SDL_VIDEODRIVER"] = "dummy"
+    result = subprocess.run(
+        ["python", "game.py", "--dummy-camera", "--smoke-frames", "60",
+         "--log-latency", str(out), "--player", "test"],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = out.read_text().splitlines()
+    header_line = next(line for line in lines if not line.startswith("#"))
+    assert header_line == ",".join(LATENCY_HEADER)

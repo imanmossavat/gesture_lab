@@ -9,6 +9,7 @@ Examples:
     python dev_bench.py simulate --frames 3000 --latency 60
     python dev_bench.py latency-report --output latency.png
     python dev_bench.py compare --output compare.png
+    python dev_bench.py report
 """
 import argparse
 import csv
@@ -22,9 +23,13 @@ import sys
 from adaptive import (
     AdaptiveController,
     Config,
+    OUTCOME_HEADER,
+    PRESETS,
     air_time,
+    apex_time,
     clears_obstacle,
     difficulty_profile,
+    jump_peak,
     timing_window,
 )
 
@@ -181,6 +186,67 @@ def cmd_feasibility(args: argparse.Namespace) -> int:
     return rc
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """Print regenerable design tables derived entirely from Config."""
+    cfg = Config()
+    air = air_time(cfg)
+    apex = apex_time(cfg)
+    peak = jump_peak(cfg)
+
+    print("Design report (all values derived from adaptive.Config)")
+    print(
+        f"Operating range: d in [{cfg.D_MIN}, {cfg.D_MAX}]  "
+        f"target success rate = {cfg.TARGET_SUCCESS_RATE}"
+    )
+    print()
+    print("Physics")
+    print(f"  air time       = {air:.3f} s")
+    print(f"  apex time      = {apex:.3f} s")
+    print(f"  jump peak      = {peak:.1f} px")
+    print()
+
+    ds = [cfg.D_MIN] + sorted(p["d"] for p in PRESETS.values()) + [cfg.D_MAX]
+    print("Difficulty profile")
+    print(f"{'d':>5} {'speed':>7} {'height':>7} {'width':>7} {'interval':>9}")
+    for d in ds:
+        prof = difficulty_profile(d, cfg)
+        print(
+            f"{d:5.2f} {prof.speed:7.1f} {prof.height:7.1f} {prof.width:7.1f} "
+            f"{prof.spawn_interval:9.3f}"
+        )
+    print()
+
+    print("Minimum gap (worst case: land before next obstacle)")
+    print(f"{'d':>5} {'speed':>7} {'required_gap_px':>15} {'status':>10}")
+    for d in ds:
+        prof = difficulty_profile(d, cfg)
+        required = max(cfg.MIN_GAP_FLOOR_PX, prof.speed * (air + cfg.LANDING_MARGIN_S))
+        status = "ok" if required >= cfg.MIN_GAP_FLOOR_PX else "floor"
+        print(f"{d:5.2f} {prof.speed:7.1f} {required:15.1f} {status:>10}")
+    print()
+
+    print("Clearance budget (height +10% jitter)")
+    print(f"{'d':>5} {'speed':>7} {'half_window_s':>13} {'window_ms':>10}")
+    for d in ds:
+        prof = difficulty_profile(d, cfg)
+        h = prof.height * (1.0 + cfg.HEIGHT_JITTER)
+        half = timing_window(h, prof.width, prof.speed, cfg)
+        print(
+            f"{d:5.2f} {prof.speed:7.1f} {half:13.4f} {half * 1000.0:10.2f}"
+        )
+    print()
+
+    print("Controller update per outcome")
+    success_delta = cfg.ADAPTATION_RATE * (1.0 - cfg.TARGET_SUCCESS_RATE)
+    failure_delta = cfg.ADAPTATION_RATE * (0.0 - cfg.TARGET_SUCCESS_RATE)
+    print(f"  success delta  = +{success_delta:.4f} d")
+    print(f"  failure delta  = {failure_delta:.4f} d")
+    if cfg.MOMENTUM > 0.0:
+        long_run = cfg.ADAPTATION_RATE / (1.0 - cfg.MOMENTUM)
+        print(f"  long-run gain  = {long_run:.4f} d/outcome (momentum {cfg.MOMENTUM})")
+    return 0
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
     cfg = Config()
     print("Difficulty sweep")
@@ -239,10 +305,7 @@ def cmd_simulate(args: argparse.Namespace) -> int:
                     "tail": args.tail,
                 },
             )
-            writer = csv.DictWriter(f, fieldnames=[
-                "t_s", "player", "session", "mode", "d_spawn", "d_after",
-                "speed", "height", "width", "outcome",
-            ])
+            writer = csv.DictWriter(f, fieldnames=OUTCOME_HEADER)
             writer.writeheader()
             writer.writerows(rows)
         print(f"  CSV written to {args.csv}")
@@ -323,10 +386,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     if args.csv:
         with open(args.csv, "w", newline="") as f:
             _write_csv_meta(f, cfg, extra={"log_type": "bench_compare", "seed": args.seed})
-            writer = csv.DictWriter(f, fieldnames=[
-                "t_s", "player", "session", "mode", "variant", "d_spawn", "d_after",
-                "speed", "height", "width", "outcome",
-            ])
+            writer = csv.DictWriter(f, fieldnames=OUTCOME_HEADER[:4] + ["variant"] + OUTCOME_HEADER[4:])
             writer.writeheader()
             writer.writerows(all_rows)
         print(f"CSV written to {args.csv}")
@@ -397,10 +457,7 @@ def cmd_latency_report(args: argparse.Namespace) -> int:
                     "miss_prob": args.miss,
                 },
             )
-            writer = csv.DictWriter(f, fieldnames=[
-                "t_s", "player", "session", "mode", "latency_ms", "d_spawn", "d_after",
-                "speed", "height", "width", "outcome",
-            ])
+            writer = csv.DictWriter(f, fieldnames=OUTCOME_HEADER[:4] + ["latency_ms"] + OUTCOME_HEADER[4:])
             writer.writeheader()
             writer.writerows(all_rows)
         print(f"CSV written to {args.csv}")
@@ -480,6 +537,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_play = sub.add_parser("play", help="note about interactive play")
     p_play.set_defaults(func=cmd_play)
+
+    p_rep = sub.add_parser("report", help="print regenerable design tables")
+    p_rep.set_defaults(func=cmd_report)
 
     return parser
 

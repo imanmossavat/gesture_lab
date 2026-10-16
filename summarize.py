@@ -11,7 +11,7 @@ Put this file in the repo root (next to adaptive.py), then:
     python summarize.py data/*.csv --trim-start 10 --anon --out summary.txt
 
 Handles both log types (detected from the header):
-  outcomes : t_s, player, [session], mode, d_spawn, d_after, speed, height,
+  outcomes : t_s, player, session, mode, d_spawn, d_after, speed, height,
              width, outcome            (written by --log-outcomes)
   latency  : frame_read_to_jump_ms, first_open_to_jump_ms, inference_ms,
              loop_ms, accepted         (written by --log-latency)

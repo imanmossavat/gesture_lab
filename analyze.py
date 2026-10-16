@@ -5,8 +5,8 @@ Two CSV types are detected automatically from the header:
 
   latency  : frame_read_to_jump_ms, first_open_to_jump_ms, inference_ms,
              loop_ms, accepted           (written by --log-latency)
-  outcomes : t_s, player, mode, d_spawn, d_after, speed, height, width,
-             outcome (1 = cleared, 0 = crashed)   (written by --log-outcomes)
+  outcomes : t_s, player, session, mode, d_spawn, d_after, speed, height,
+             width, outcome (1 = cleared, 0 = crashed)   (written by --log-outcomes)
 
 Examples:
     python analyze.py run1.csv
