@@ -43,6 +43,57 @@ PRESETS = {
     3: {"d": 0.75, "threshold": 0.70, "stability": 3, "color": (255, 110, 110)},
 }
 
+class GameState:
+    """Encapsulates the mutable game/session state so it can be unit-tested."""
+
+    def __init__(self, controller, config):
+        self.controller = controller
+        self.config = config
+        self.ground_y = 590
+        self.player_x = 620
+        self.player_w = 42
+        self.player_h = 56
+        self.gravity = 1800.0
+        self.jump_velocity = -690.0
+        self.tracker = SessionTracker()
+        self.game_start = time.perf_counter()
+        self.preset_id = 2
+        self.threshold = PRESETS[self.preset_id]["threshold"]
+        self.stability = PRESETS[self.preset_id]["stability"]
+        self.diff_color = PRESETS[self.preset_id]["color"]
+        self.player_y = self.ground_y - self.player_h
+        self.velocity_y = 0.0
+        self.obstacles = []
+        self.spawn_timer = 0.8
+        self.jump_latched = False
+        self.stable_count = 0
+        self.debug_overlay = False
+        # Initialize controller and start first session.
+        self.set_preset(self.preset_id)
+
+    def set_preset(self, pid):
+        self.preset_id = pid
+        settings = PRESETS[pid]
+        self.controller.d = settings["d"]
+        self.threshold = settings["threshold"]
+        self.stability = settings["stability"]
+        self.diff_color = settings["color"]
+        self.tracker.bump()
+        self.obstacles = []
+        self.spawn_timer = 0.8
+
+    def reset_game(self):
+        self.player_y = self.ground_y - self.player_h
+        self.velocity_y = 0.0
+        self.obstacles = []
+        self.spawn_timer = 0.8
+        self.jump_latched = False
+        self.stable_count = 0
+        self.game_start = time.perf_counter()
+        self.controller.reset()
+        self.set_preset(self.preset_id)
+
+
 
 class DummyCapture:
     """Stub camera for headless smoke runs."""
@@ -149,6 +200,7 @@ def main():
     config = Config()
     rng = random.Random()
     controller = AdaptiveController(config, rng=rng)
+    state = GameState(controller, config)
 
     # Latency diagnostics (rolling windows + counters)
     frame_to_jump = LatencyTracker(config.LATENCY_WINDOW)
@@ -174,76 +226,38 @@ def main():
             ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
         )
 
-    game_start = time.perf_counter()
-    tracker = SessionTracker()
-
     valid_gestures = 0
     accepted_jumps = 0
     rejected_jumps = 0
 
     detected = "none"
     score = 0.0
-    stable_count = 0
-    jump_latched = False
+    state.stable_count = 0
+    state.jump_latched = False
     first_open_time = 0.0
     camera_surface = None
 
-    # Game state
-    ground_y = 590
-    player_x = 620
-    player_w, player_h = 42, 56
-    player_y = ground_y - player_h
-    velocity_y = 0.0
-    gravity = 1800.0
-    jump_velocity = -690.0
-    obstacles = []
-    spawn_timer = 0.8
-    debug_overlay = False
-
+    # Game state (constants kept local; mutable state lives in ``state``)
+    ground_y = state.ground_y
+    player_x = state.player_x
+    player_w, player_h = state.player_w, state.player_h
+    gravity = state.gravity
+    jump_velocity = state.jump_velocity
     running = True
-    preset_id = 2
-    threshold = PRESETS[preset_id]["threshold"]
-    stability = PRESETS[preset_id]["stability"]
-    diff_color = PRESETS[preset_id]["color"]
-
-    def set_preset(pid):
-        nonlocal preset_id, threshold, stability, diff_color
-        preset_id = pid
-        settings = PRESETS[pid]
-        controller.d = settings["d"]
-        threshold = settings["threshold"]
-        stability = settings["stability"]
-        diff_color = settings["color"]
-        tracker.bump()
-
-    def reset_game():
-        nonlocal player_y, velocity_y, obstacles, spawn_timer
-        nonlocal jump_latched, stable_count, debug_overlay, game_start
-        player_y = ground_y - player_h
-        velocity_y = 0.0
-        obstacles = []
-        spawn_timer = 0.8
-        jump_latched = False
-        stable_count = 0
-        game_start = time.perf_counter()
-        controller.reset()
-        set_preset(preset_id)
 
     def draw_text(text, x, y, color=(235, 240, 245), use_small=False):
         surf = (small if use_small else font).render(text, True, color)
         screen.blit(surf, (x, y))
 
-    set_preset(preset_id)
-
     def on_outcome(ob, outcome):
         if outcomes_writer is None:
             return
-        t_s = time.perf_counter() - game_start
+        t_s = time.perf_counter() - state.game_start
         outcomes_writer.writerow([
             f"{t_s:.3f}",
             args.player,
-            tracker.current,
-            preset_id,
+            state.tracker.current,
+            state.preset_id,
             f"{ob.d_spawn:.4f}",
             f"{controller.d:.4f}",
             f"{ob.speed_spawn:.1f}",
@@ -264,19 +278,19 @@ def main():
                 if event.key in (pygame.K_q, pygame.K_ESCAPE):
                     running = False
                 elif event.key == pygame.K_r:
-                    reset_game()
+                    state.reset_game()
                 elif event.key == pygame.K_1:
-                    set_preset(1)
+                    state.set_preset(1)
                 elif event.key == pygame.K_2:
-                    set_preset(2)
+                    state.set_preset(2)
                 elif event.key == pygame.K_3:
-                    set_preset(3)
+                    state.set_preset(3)
                 elif event.key == pygame.K_d:
-                    debug_overlay = not debug_overlay
+                    state.debug_overlay = not state.debug_overlay
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                    threshold = min(0.95, threshold + 0.05)
+                    state.threshold = min(0.95, state.threshold + 0.05)
                 elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                    threshold = max(0.10, threshold - 0.05)
+                    state.threshold = max(0.10, state.threshold - 0.05)
 
         ok, frame = cap.read()
         frame_read_time = time.perf_counter()
@@ -307,22 +321,22 @@ def main():
             )
 
         open_event = False
-        if detected == "open" and score >= threshold:
-            if stable_count == 0:
+        if detected == "open" and score >= state.threshold:
+            if state.stable_count == 0:
                 first_open_time = time.perf_counter()
-            stable_count += 1
-            if stable_count >= stability and not jump_latched:
+            state.stable_count += 1
+            if state.stable_count >= state.stability and not state.jump_latched:
                 open_event = True
         else:
-            stable_count = 0
-            jump_latched = False
+            state.stable_count = 0
+            state.jump_latched = False
 
         if open_event:
             jump_time = time.perf_counter()
-            velocity_y, accepted = attempt_jump(
-                player_y, velocity_y, ground_y, player_h, jump_velocity
+            state.velocity_y, accepted = attempt_jump(
+                state.player_y, state.velocity_y, ground_y, player_h, jump_velocity
             )
-            jump_latched = True
+            state.jump_latched = True
             valid_gestures += 1
             if accepted:
                 accepted_jumps += 1
@@ -335,11 +349,11 @@ def main():
 
 
         # Player physics (always runs; no game over)
-        velocity_y += gravity * dt
-        player_y += velocity_y * dt
-        if player_y > ground_y - player_h:
-            player_y = ground_y - player_h
-            velocity_y = 0.0
+        state.velocity_y += gravity * dt
+        state.player_y += state.velocity_y * dt
+        if state.player_y > ground_y - player_h:
+            state.player_y = ground_y - player_h
+            state.velocity_y = 0.0
 
         # Speed policy: one global speed from the current d.  The controller
         # changes d by at most ETA = 0.08 per outcome, so speed changes by at
@@ -349,22 +363,22 @@ def main():
         speed = profile.speed
 
         # Spawn logic with min-gap retry.
-        spawn_timer -= dt
-        if spawn_timer <= 0.0:
-            prev_ob = obstacles[-1] if obstacles else None
+        state.spawn_timer -= dt
+        if state.spawn_timer <= 0.0:
+            prev_ob = state.obstacles[-1] if state.obstacles else None
             new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
             if new_ob is not None:
-                obstacles.append(new_ob)
-                spawn_timer = next_spawn_timer(profile, rng, config)
+                state.obstacles.append(new_ob)
+                state.spawn_timer = next_spawn_timer(profile, rng, config)
             else:
                 # Retry on the next frame.
-                spawn_timer = min(dt, 0.01)
+                state.spawn_timer = min(dt, 0.01)
 
         # Resolve obstacles and update d exactly once per obstacle.
-        obstacles = resolve_obstacles(
-            obstacles,
+        state.obstacles = resolve_obstacles(
+            state.obstacles,
             player_x,
-            player_y,
+            state.player_y,
             player_w,
             player_h,
             ground_y,
@@ -408,10 +422,10 @@ def main():
 
         pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
 
-        draw_text(f"Difficulty preset: {preset_id} (d={controller.d:.2f})", 525, 25)
-        pygame.draw.rect(screen, diff_color, (780, 28, 20, 14), border_radius=3)
+        draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
+        pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
         draw_text(f"Gesture: {detected} ({score:.2f})", 525, 58)
-        draw_text(f"Threshold: {threshold:.2f}  (+ / -)", 525, 91)
+        draw_text(f"Threshold: {state.threshold:.2f}  (+ / -)", 525, 91)
         draw_text(f"Speed: {speed:.0f}", 525, 124)
         draw_text(f"FPS: {fps:.1f}  |  Loop: {loop_ms:.1f} ms", 525, 157)
         draw_text(
@@ -426,10 +440,10 @@ def main():
         pygame.draw.rect(
             screen,
             (88, 197, 255),
-            (int(player_x), int(player_y), player_w, player_h),
+            (int(player_x), int(state.player_y), player_w, player_h),
             border_radius=7,
         )
-        for ob in obstacles:
+        for ob in state.obstacles:
             color = (120, 120, 120) if ob.failed else (255, 111, 105)
             rect = pygame.Rect(
                 int(ob.x), int(ground_y - ob.h), int(ob.w), int(ob.h)
@@ -439,7 +453,7 @@ def main():
         draw_text(f"Cleared: {controller.successes}  Crashed: {controller.failures}", 24, 410)
         draw_text("Open hand = jump. Close hand to re-arm.", 24, 445, use_small=True)
 
-        if debug_overlay:
+        if state.debug_overlay:
             recent = controller.recent_success_rate()
             lines = [
                 "--- debug ---",

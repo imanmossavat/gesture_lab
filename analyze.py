@@ -171,7 +171,10 @@ def latency_report(rows, i0, i1, name, plot):
           "\n  jitter are larger than shown.")
 
     if plot:
-        _plot_latency(rows, i0, i1, name, plot)
+        try:
+            _plot_latency(rows, i0, i1, name, plot)
+        except Exception as exc:
+            print(f"  note: plot could not be drawn: {exc}")
 
 
 def _plot_latency(rows, i0, i1, name, out):
@@ -201,11 +204,19 @@ def dcol(rows):
     return None
 
 
+def _session_plot_path(base, sid):
+    if base is None:
+        return None
+    pp = Path(base)
+    return str(pp.with_name(f"{pp.stem}_s{sid}{pp.suffix}"))
+
+
 def outcomes_report(rows, i0, i1, name, a, plot=None, pooled=False):
     kept = rows[i0:i1]
     n = len(kept)
+    total = len(rows)
     if n == 0:
-        print(f"\n=== {name}  [outcome log]  rows: 0 total, 0 kept "
+        print(f"\n=== {name}  [outcome log]  rows: {total} total, 0 kept "
               f"(dropped {i0} at start, {len(rows) - i1} at end)")
         print("  too few obstacles after trimming")
         return
@@ -215,17 +226,21 @@ def outcomes_report(rows, i0, i1, name, a, plot=None, pooled=False):
             sessions.setdefault(int(r["session"]), []).append(r)
         if len(sessions) > 1:
             for sid in sorted(sessions):
-                _outcomes_body(sessions[sid], f"{name} session {sid}", a, plot=None, pooled=False)
-            _outcomes_body(kept, f"{name} all sessions", a, plot=plot, pooled=True,
-                           dropped_start=i0, dropped_end=len(rows) - i1)
+                session_plot = _session_plot_path(plot, sid)
+                _outcomes_body(sessions[sid], f"{name} session {sid}", a, plot=session_plot,
+                               pooled=False, total=total,
+                               dropped_start=i0, dropped_end=len(rows) - i1)
+            _outcomes_body(kept, f"{name} all sessions", a, plot=None, pooled=True,
+                           total=total, dropped_start=i0, dropped_end=len(rows) - i1)
             return
     _outcomes_body(kept, name, a, plot=plot, pooled=pooled,
-                   dropped_start=i0, dropped_end=len(rows) - i1)
+                   total=total, dropped_start=i0, dropped_end=len(rows) - i1)
 
 
-def _outcomes_body(kept, name, a, plot=None, pooled=False, dropped_start=0, dropped_end=0):
+def _outcomes_body(kept, name, a, plot=None, pooled=False, total=None, dropped_start=0, dropped_end=0):
     tag = "pooled" if pooled else "outcome log"
-    print(f"\n=== {name}  [{tag}]  rows: {len(kept)} total, {len(kept)} kept "
+    total = total if total is not None else len(kept)
+    print(f"\n=== {name}  [{tag}]  rows: {total} total, {len(kept)} kept "
           f"(dropped {dropped_start} at start, {dropped_end} at end)")
     n = len(kept)
     if n < 5:
@@ -302,7 +317,10 @@ def _outcomes_body(kept, name, a, plot=None, pooled=False, dropped_start=0, drop
         print("  not enough data per bin for a p(d) conclusion")
 
     if plot and not pooled:
-        _plot_outcomes(d, out, roll, w, dropped_start, bins, name, plot, a.target)
+        try:
+            _plot_outcomes(d, out, roll, w, dropped_start, bins, name, plot, a.target)
+        except Exception as exc:
+            print(f"  note: plot could not be drawn: {exc}")
 def _plot_outcomes(d, out, roll, w, i0, bins, name, path, target):
     plt = _mpl()
     if not plt:

@@ -497,3 +497,67 @@ def test_analyze_per_session_and_combined_summary(tmp_path):
     sess2 = block_with("session 2")
     assert "from obstacle #0" in sess1, sess1
     assert "from obstacle #0" in sess2, sess2
+
+
+# ---------------------------------------------------------------------------
+# Game state / preset boundary
+# ---------------------------------------------------------------------------
+
+def test_preset_change_clears_obstacles():
+    """A preset change must start a new session with no leftover obstacles."""
+    from game import GameState, PRESETS
+    from adaptive import AdaptiveController, Config, Obstacle
+
+    config = Config()
+    controller = AdaptiveController(config)
+    state = GameState(controller, config)
+
+    # Seed some obstacles as if they were spawned mid-session.
+    state.obstacles = [
+        Obstacle(100.0, 50.0, 30.0, 300.0, 0.5, False),
+        Obstacle(200.0, 55.0, 35.0, 320.0, 0.6, False),
+    ]
+    state.spawn_timer = 0.123
+    previous_session = state.tracker.current
+
+    state.set_preset(3)
+
+    assert state.tracker.current == previous_session + 1
+    assert state.obstacles == []
+    assert state.spawn_timer == pytest.approx(0.8)
+    assert controller.d == PRESETS[3]["d"]
+    assert state.threshold == PRESETS[3]["threshold"]
+    assert state.stability == PRESETS[3]["stability"]
+
+
+def test_analyze_multi_session_plot(tmp_path):
+    """analyze.py --plot writes one PNG per session for multi-session files."""
+    matplotlib = pytest.importorskip("matplotlib")
+    csv_path = tmp_path / "two_sessions.csv"
+    header = ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+    rows = []
+    # Session 1: varying d across bins, mixed outcomes.
+    for i in range(25):
+        d = 0.25 + 0.5 * (i / 24.0)
+        rows.append([i, "test", 1, 2, f"{d:.4f}", f"{d:.4f}", 300, 50, 30, 1 if i % 3 else 0])
+    # Session 2: different d range, mixed outcomes.
+    for i in range(25):
+        d = 0.6 + 0.3 * (i / 24.0)
+        rows.append([25 + i, "test", 2, 3, f"{d:.4f}", f"{d:.4f}", 350, 60, 32, 1 if i % 4 else 0])
+    lines = [",".join(str(c) for c in header)]
+    lines += [",".join(str(c) for c in r) for r in rows]
+    csv_path.write_text("\n".join(lines) + "\n")
+
+    plot_base = tmp_path / "report.png"
+    result = subprocess.run(
+        ["python", "analyze.py", str(csv_path), "--plot", str(plot_base), "--window", "10", "--tail", "10"],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "report_s1.png").exists()
+    assert (tmp_path / "report_s2.png").exists()
+    # Pooled summary should not produce a plot file.
+    assert not (tmp_path / "report_all sessions.png").exists()
+    assert not (tmp_path / "report_all_sessions.png").exists()
