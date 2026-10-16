@@ -10,7 +10,7 @@ import random
 import statistics
 from collections import deque
 from dataclasses import dataclass
-from typing import NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,10 @@ class Config:
     WIDTH_MIN: float = 20.0
     WIDTH_MAX: float = 35.0  # 20 + 15
     SPAWN_INTERVAL_BASE_AT_D0: float = 2.5
-    SPAWN_INTERVAL_BASE_AT_D1: float = 1.5  # 2.5 - 1.0
+    SPAWN_INTERVAL_BASE_AT_D1: float = 1.3  # 2.5 - 1.2
+
+    # Spawn interval jitter -- multiplicative, only ever lengthens the interval.
+    SPAWN_INTERVAL_JITTER: tuple[float, float] = (1.0, 1.3)
 
     # Height jitter -- theoretical range that adds variation without breaking feasibility.
     # Width is *not* jittered; only height gets ±10% variation.
@@ -77,6 +80,8 @@ class Obstacle:
     h: float
     done: bool = False
     failed: bool = False
+    d_spawn: float = 0.0
+    speed_spawn: float = 0.0
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -252,6 +257,7 @@ def try_spawn(
     speed: float,
     rng: random.Random,
     config: Optional[Config] = None,
+    d: float = 0.0,
 ) -> Optional[Obstacle]:
     """Attempt to spawn a new obstacle respecting the min-gap rule.
 
@@ -264,7 +270,27 @@ def try_spawn(
         return None
     h = randomize_height(profile, rng, cfg)
     w = profile.width  # no width jitter
-    return Obstacle(x=float(left), w=w, h=h, done=False, failed=False)
+    return Obstacle(
+        x=float(left), w=w, h=h, done=False, failed=False,
+        d_spawn=d, speed_spawn=profile.speed,
+    )
+
+
+def next_spawn_timer(
+    profile: DifficultyProfile,
+    rng: random.Random,
+    config: Optional[Config] = None,
+) -> float:
+    """Return a jittered spawn timer in seconds.
+
+    The interval is multiplied by a uniform factor in
+    ``Config.SPAWN_INTERVAL_JITTER``.  The default range (1.0, 1.3) only ever
+    lengthens the interval, so the shortest possible interval is the base
+    ``profile.spawn_interval``.
+    """
+    cfg = config or Config()
+    jitter_min, jitter_max = cfg.SPAWN_INTERVAL_JITTER
+    return profile.spawn_interval * rng.uniform(jitter_min, jitter_max)
 
 
 # ---------------------------------------------------------------------------
@@ -301,30 +327,36 @@ def resolve_obstacles(
     dt: float,
     controller: AdaptiveController,  # forward declaration handled by annotations
     config: Optional[Config] = None,
+    on_outcome: Optional[Callable[[Obstacle, int], None]] = None,
 ) -> list[Obstacle]:
     """Move obstacles, record exactly one outcome per obstacle, and update ``d``.
 
     Success: obstacle's right edge passes the player's left edge with no
     collision ever.  Failure: first frame of overlap.  ``done`` prevents double
-    counting.  Off-screen obstacles are removed.
+    counting.  Every obstacle (including ``done`` ones) keeps scrolling left.
+    Off-screen obstacles are removed.
     """
     cfg = config or Config()
-    for ob in obstacles:
-        if ob.done:
-            continue
 
-        # Failure check before movement keeps the frame of first overlap exact.
-        if _rects_overlap(ob, player_x, player_y, player_w, player_h, ground_y):
-            controller.update(0)
+    def _record(ob: Obstacle, outcome: int) -> None:
+        controller.update(outcome)
+        if on_outcome is not None:
+            on_outcome(ob, outcome)
+
+    for ob in obstacles:
+        # Failure on the first frame of overlap; only check live obstacles.
+        if not ob.done and _rects_overlap(ob, player_x, player_y, player_w, player_h, ground_y):
             ob.failed = True
             ob.done = True
-            continue
+            _record(ob, 0)
 
+        # Every obstacle keeps scrolling, even after it is done.
         ob.x -= speed * dt
 
-        if ob.x + ob.w < player_x:
-            controller.update(1)
+        # Success once the obstacle has fully passed the player.
+        if not ob.done and ob.x + ob.w < player_x:
             ob.done = True
+            _record(ob, 1)
 
     # Remove obstacles that have fully left the screen.
     keep = [ob for ob in obstacles if ob.x + ob.w > -10.0]

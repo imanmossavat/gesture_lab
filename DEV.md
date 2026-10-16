@@ -21,12 +21,15 @@ to tune it.
 speed = 260 + 170*d
 height = 30 + 40*d
 width  = 20 + 15*d
-spawn_interval = 2.5 - 1.0*d
+spawn_interval = 2.5 - 1.2*d
 ```
 
 Height is jittered ±10% at spawn time.  Width is **not** jittered because the
 timing window depends on the horizontal overlap `(w + PLAYER_WIDTH) / speed`,
 and width jitter would break the min-gap guarantee.
+
+The actual time between spawns is `spawn_interval * uniform(1.0, 1.3)`, which
+only ever lengthens the base interval.
 
 ## Physics helpers
 
@@ -103,6 +106,28 @@ Rolling-window statistics (mean, median, p90, std) are shown in the debug
 overlay (press **D** in-game).
 
 Use `--log-latency latency.csv` to write every jump event to disk.
+
+## Outcome logging
+
+Use `--log-outcomes path.csv` to write one row per obstacle outcome:
+
+```text
+t_s, player, mode, d_spawn, d_after, speed, height, width, outcome
+```
+
+- `t_s` is seconds since the last restart.
+- `player` is set with `--player` (default `anon`).
+- `mode` is the in-game difficulty preset (1/2/3).
+- `d_spawn` is the controller `d` used to spawn the obstacle.
+- `d_after` is `d` after the controller has processed the outcome.
+- `outcome` is `1` for a successful clear and `0` for a crash.
+
+Analyze the log with:
+
+```bash
+python analyze.py run1.csv
+python analyze.py run1.csv --plot report.png
+```
 
 ## Running checks
 

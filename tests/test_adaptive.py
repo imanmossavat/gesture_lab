@@ -2,8 +2,12 @@
 
 These tests require no camera, no display, and no MediaPipe model.
 """
+import csv
 import math
+import os
 import random
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +21,7 @@ from adaptive import (
     clears_obstacle,
     difficulty_profile,
     jump_peak,
+    next_spawn_timer,
     resolve_obstacles,
     spawn_allowed,
     time_above,
@@ -40,13 +45,13 @@ def test_profile_at_difficulty_boundaries():
     assert p1.speed == pytest.approx(430.0)
     assert p1.height == pytest.approx(70.0)
     assert p1.width == pytest.approx(35.0)
-    assert p1.spawn_interval == pytest.approx(1.5)
+    assert p1.spawn_interval == pytest.approx(1.3)
 
     p5 = difficulty_profile(0.5)
     assert p5.speed == pytest.approx(345.0)
     assert p5.height == pytest.approx(50.0)
     assert p5.width == pytest.approx(27.5)
-    assert p5.spawn_interval == pytest.approx(2.0)
+    assert p5.spawn_interval == pytest.approx(1.9)
 
 
 def test_profile_clamps_out_of_range_d():
@@ -337,3 +342,81 @@ def test_seeded_simulation_steady_state_success_near_target():
     assert 0.70 <= overall_rate <= 0.80
     assert 0.72 <= last_rate <= 0.79
     assert 0.3 <= c.d <= 0.8
+
+
+def test_done_obstacle_keeps_moving_after_outcome():
+    """Regression: obstacles must scroll off-screen after being marked done."""
+    c = AdaptiveController()
+    ob = Obstacle(x=700.0, w=30.0, h=50.0)
+    cfg = Config()
+    resolve_obstacles(
+        [ob], 620.0, 534.0, 42.0, 56.0,
+        cfg.GROUND_Y, speed=300.0, dt=0.5, controller=c, config=cfg,
+    )
+    assert ob.done
+    assert c.outcomes == 1
+    x_after_success = ob.x
+    resolve_obstacles(
+        [ob], 620.0, 534.0, 42.0, 56.0,
+        cfg.GROUND_Y, speed=300.0, dt=0.1, controller=c, config=cfg,
+    )
+    assert c.outcomes == 1  # no double counting
+    assert ob.x < x_after_success
+
+
+def test_next_spawn_timer_within_jitter_range():
+    cfg = Config()
+    rng = random.Random(123)
+    profile = difficulty_profile(0.5, cfg)
+    for _ in range(20):
+        t = next_spawn_timer(profile, rng, cfg)
+        assert profile.spawn_interval <= t <= profile.spawn_interval * 1.3
+
+
+def test_on_outcome_callback_receives_single_event():
+    c = AdaptiveController()
+    recorded = []
+
+    def cb(ob, outcome):
+        recorded.append((ob, outcome))
+
+    ob = Obstacle(x=700.0, w=30.0, h=50.0)
+    cfg = Config()
+    resolve_obstacles(
+        [ob], 620.0, 534.0, 42.0, 56.0,
+        cfg.GROUND_Y, speed=300.0, dt=0.5, controller=c, config=cfg,
+        on_outcome=cb,
+    )
+    assert len(recorded) == 1
+    assert recorded[0][0] is ob
+    assert recorded[0][1] == 1
+
+
+def test_game_outcomes_csv_and_analyze(tmp_path):
+    """Smoke-run the game with --log-outcomes and consume the log with analyze.py."""
+    out = tmp_path / "o.csv"
+    env = os.environ.copy()
+    env["SDL_VIDEODRIVER"] = "dummy"
+    result = subprocess.run(
+        ["python", "game.py", "--dummy-camera", "--smoke-frames", "600",
+         "--log-outcomes", str(out), "--player", "test"],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    text = out.read_text()
+    assert text.startswith("t_s,player,mode,d_spawn,d_after,speed,height,width,outcome")
+    rows = list(csv.reader(text.splitlines()))
+    assert len(rows) > 1
+
+    analyze = subprocess.run(
+        ["python", "analyze.py", str(out)],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert analyze.returncode == 0, analyze.stderr
+    assert "n=" in analyze.stdout or "outcome" in analyze.stdout.lower()
+

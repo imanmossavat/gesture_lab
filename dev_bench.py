@@ -18,6 +18,7 @@ import sys
 from adaptive import (
     AdaptiveController,
     Config,
+    air_time,
     clears_obstacle,
     difficulty_profile,
     timing_window,
@@ -67,19 +68,36 @@ def _simulate(
 
 def cmd_feasibility(args: argparse.Namespace) -> int:
     cfg = Config()
-    print("Feasibility check (theoretical clearance margin in seconds)")
-    print(f"{'d':>4} {'speed':>6} {'h':>6} {'w':>6} {'margin':>10} {'status':>10}")
+    air = air_time(cfg)
+    print(f"Feasibility check (gap mode: {args.gap_mode})")
+    print(
+        f"{'d':>4} {'speed':>6} {'h':>6} {'w':>6} "
+        f"{'gap_px':>7} {'slack_s':>8} {'status':>10}"
+    )
+    rc = 0
     for d in (0.0, 0.25, 0.5, 0.75, 1.0):
         profile = difficulty_profile(d, cfg)
         # Worst-case height with +10% jitter.
         h = profile.height * 1.1
+        if args.gap_mode == "schedule":
+            gap_px = profile.speed * profile.spawn_interval
+        else:  # fixed650
+            gap_px = 650.0
+        slack_s = gap_px / profile.speed - air
         margin = timing_window(h, profile.width, profile.speed, cfg)
-        status = "feasible" if margin > 0 else "impossible"
+        if slack_s < cfg.LANDING_MARGIN_S:
+            status = "tight"
+            rc = 1
+        elif margin <= 0.0:
+            status = "impossible"
+            rc = 1
+        else:
+            status = "ok"
         print(
             f"{d:4.2f} {profile.speed:6.1f} {h:6.1f} {profile.width:6.1f} "
-            f"{margin:10.4f} {status:>10}"
+            f"{gap_px:7.1f} {slack_s:8.4f} {status:>10}"
         )
-    return 0
+    return rc
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
@@ -234,6 +252,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_feas = sub.add_parser("feasibility", help="check theoretical clearance at key difficulties")
+    p_feas.add_argument(
+        "--gap-mode",
+        choices=["fixed650", "schedule"],
+        default="schedule",
+        help="how to measure the gap between obstacles (default: schedule)",
+    )
     p_feas.set_defaults(func=cmd_feasibility)
 
     p_sweep = sub.add_parser("sweep", help="sweep d and print parameters")

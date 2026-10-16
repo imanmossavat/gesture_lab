@@ -23,6 +23,7 @@ from adaptive import (
     LatencyTracker,
     attempt_jump,
     difficulty_profile,
+    next_spawn_timer,
     resolve_obstacles,
     try_spawn,
 )
@@ -85,6 +86,18 @@ def parse_args():
         type=str,
         default=None,
         help="Optional CSV path for jump-latency logs",
+    )
+    parser.add_argument(
+        "--player",
+        type=str,
+        default="anon",
+        help="Player name written to --log-outcomes",
+    )
+    parser.add_argument(
+        "--log-outcomes",
+        type=str,
+        default=None,
+        help="Optional CSV path for obstacle-outcome logs",
     )
     return parser.parse_args()
 
@@ -151,6 +164,17 @@ def main():
     else:
         latency_writer = None
 
+    outcomes_log = None
+    outcomes_writer = None
+    if args.log_outcomes:
+        outcomes_log = open(args.log_outcomes, "w", newline="")
+        outcomes_writer = csv.writer(outcomes_log)
+        outcomes_writer.writerow(
+            ["t_s", "player", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+        )
+
+    game_start = time.perf_counter()
+
     valid_gestures = 0
     accepted_jumps = 0
     rejected_jumps = 0
@@ -191,13 +215,14 @@ def main():
 
     def reset_game():
         nonlocal player_y, velocity_y, obstacles, spawn_timer
-        nonlocal jump_latched, stable_count, debug_overlay
+        nonlocal jump_latched, stable_count, debug_overlay, game_start
         player_y = ground_y - player_h
         velocity_y = 0.0
         obstacles = []
         spawn_timer = 0.8
         jump_latched = False
         stable_count = 0
+        game_start = time.perf_counter()
         controller.reset()
         set_preset(preset_id)
 
@@ -206,6 +231,23 @@ def main():
         screen.blit(surf, (x, y))
 
     set_preset(preset_id)
+
+    def on_outcome(ob, outcome):
+        if outcomes_writer is None:
+            return
+        t_s = time.perf_counter() - game_start
+        outcomes_writer.writerow([
+            f"{t_s:.3f}",
+            args.player,
+            preset_id,
+            f"{ob.d_spawn:.4f}",
+            f"{controller.d:.4f}",
+            f"{ob.speed_spawn:.1f}",
+            f"{ob.h:.1f}",
+            f"{ob.w:.1f}",
+            outcome,
+        ])
+        outcomes_log.flush()
 
     while running:
         loop_start = time.perf_counter()
@@ -287,11 +329,6 @@ def main():
             open_to_jump.add((jump_time - first_open_time) * 1000.0)
             infer_ms_tracker.add(infer_ms)
 
-            if latency_writer is not None:
-                # loop_ms is not known yet; we write it in the next frame by
-                # keeping the last jump's pending row.  Simpler: log without loop
-                # and record loop_ms separately below.
-                pass
 
         # Player physics (always runs; no game over)
         velocity_y += gravity * dt
@@ -311,10 +348,10 @@ def main():
         spawn_timer -= dt
         if spawn_timer <= 0.0:
             prev_ob = obstacles[-1] if obstacles else None
-            new_ob = try_spawn(prev_ob, profile, speed, rng, config)
+            new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
             if new_ob is not None:
                 obstacles.append(new_ob)
-                spawn_timer = profile.spawn_interval
+                spawn_timer = next_spawn_timer(profile, rng, config)
             else:
                 # Retry on the next frame.
                 spawn_timer = min(dt, 0.01)
@@ -331,6 +368,7 @@ def main():
             dt,
             controller,
             config,
+            on_outcome=on_outcome,
         )
 
         loop_ms = (time.perf_counter() - loop_start) * 1000.0
@@ -430,6 +468,8 @@ def main():
     cap.release()
     if latency_log is not None:
         latency_log.close()
+    if outcomes_log is not None:
+        outcomes_log.close()
     pygame.quit()
 
 
