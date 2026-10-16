@@ -3,3 +3,8 @@ report.png
 *.orig
 __pycache__/
 .DS_Store
+.pytest_cache/
+.venv/
+venv/
+*.py[cod]
+*.log

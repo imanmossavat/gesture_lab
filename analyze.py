@@ -49,7 +49,9 @@ def wilson(k, n, z=1.96):
     denom = 1 + z * z / n
     centre = (p + z * z / (2 * n)) / denom
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return centre - half, centre + half
+    lo = max(0.0, centre - half)
+    hi = min(1.0, centre + half)
+    return lo, hi
 
 
 def describe(v):
@@ -201,9 +203,30 @@ def dcol(rows):
 
 def outcomes_report(rows, i0, i1, name, a, plot=None, pooled=False):
     kept = rows[i0:i1]
+    n = len(kept)
+    if n == 0:
+        print(f"\n=== {name}  [outcome log]  rows: 0 total, 0 kept "
+              f"(dropped {i0} at start, {len(rows) - i1} at end)")
+        print("  too few obstacles after trimming")
+        return
+    if "session" in kept[0]:
+        sessions = {}
+        for r in kept:
+            sessions.setdefault(int(r["session"]), []).append(r)
+        if len(sessions) > 1:
+            for sid in sorted(sessions):
+                _outcomes_body(sessions[sid], f"{name} session {sid}", a, plot=None, pooled=False)
+            _outcomes_body(kept, f"{name} all sessions", a, plot=plot, pooled=True,
+                           dropped_start=i0, dropped_end=len(rows) - i1)
+            return
+    _outcomes_body(kept, name, a, plot=plot, pooled=pooled,
+                   dropped_start=i0, dropped_end=len(rows) - i1)
+
+
+def _outcomes_body(kept, name, a, plot=None, pooled=False, dropped_start=0, dropped_end=0):
     tag = "pooled" if pooled else "outcome log"
-    print(f"\n=== {name}  [{tag}]  rows: {len(rows)} total, {len(kept)} kept "
-          f"(dropped {i0} at start, {len(rows) - i1} at end)")
+    print(f"\n=== {name}  [{tag}]  rows: {len(kept)} total, {len(kept)} kept "
+          f"(dropped {dropped_start} at start, {dropped_end} at end)")
     n = len(kept)
     if n < 5:
         print("  too few obstacles after trimming")
@@ -279,9 +302,7 @@ def outcomes_report(rows, i0, i1, name, a, plot=None, pooled=False):
         print("  not enough data per bin for a p(d) conclusion")
 
     if plot and not pooled:
-        _plot_outcomes(d, out, roll, w, i0, bins, name, plot, a.target)
-
-
+        _plot_outcomes(d, out, roll, w, dropped_start, bins, name, plot, a.target)
 def _plot_outcomes(d, out, roll, w, i0, bins, name, path, target):
     plt = _mpl()
     if not plt:

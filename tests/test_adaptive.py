@@ -16,6 +16,7 @@ from adaptive import (
     Config,
     LatencyTracker,
     Obstacle,
+    SessionTracker,
     air_time,
     attempt_jump,
     clears_obstacle,
@@ -392,6 +393,18 @@ def test_on_outcome_callback_receives_single_event():
     assert recorded[0][1] == 1
 
 
+def test_feasibility_schedule_slack_values():
+    cfg = Config()
+    air = air_time(cfg)
+    jitter_min = cfg.SPAWN_INTERVAL_JITTER[0]
+    expected = [1.656, 1.355, 1.054, 0.753, 0.452]
+    for d, exp in zip([0.0, 0.25, 0.5, 0.75, 1.0], expected):
+        profile = difficulty_profile(d, cfg)
+        gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
+        slack = gap_px / profile.speed - air
+        assert slack == pytest.approx(exp, abs=0.001)
+
+
 def test_game_outcomes_csv_and_analyze(tmp_path):
     """Smoke-run the game with --log-outcomes and consume the log with analyze.py."""
     out = tmp_path / "o.csv"
@@ -407,7 +420,7 @@ def test_game_outcomes_csv_and_analyze(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     text = out.read_text()
-    assert text.startswith("t_s,player,mode,d_spawn,d_after,speed,height,width,outcome")
+    assert text.startswith("t_s,player,session,mode,d_spawn,d_after,speed,height,width,outcome")
     rows = list(csv.reader(text.splitlines()))
     assert len(rows) > 1
 
@@ -420,3 +433,67 @@ def test_game_outcomes_csv_and_analyze(tmp_path):
     assert analyze.returncode == 0, analyze.stderr
     assert "n=" in analyze.stdout or "outcome" in analyze.stdout.lower()
 
+# ---------------------------------------------------------------------------
+# Sessions / analyze integration
+# ---------------------------------------------------------------------------
+
+def test_session_tracker_increments_monotonically():
+    tracker = SessionTracker()
+    assert tracker.current == 0
+    assert tracker.bump() == 1
+    assert tracker.bump() == 2
+    assert tracker.current == 2
+
+
+def test_analyze_per_session_and_combined_summary(tmp_path):
+    """analyze.py splits by session and reports tail/settling per session."""
+    csv_path = tmp_path / "two_sessions.csv"
+    header = ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+    rows = []
+    # Session 1: d stays near 0.5, all successes -> should settle from obstacle #0.
+    for i in range(20):
+        d = 0.5 + i * 0.002
+        rows.append([i, "test", 1, 2, f"{d:.4f}", f"{d:.4f}", 300, 50, 30, 1])
+    # Session 2: d starts near 0.9 (big jump from session 1) and stays there.
+    for i in range(15):
+        d = 0.9 - i * 0.002
+        rows.append([20 + i, "test", 2, 3, f"{d:.4f}", f"{d:.4f}", 400, 65, 33, 1])
+    lines = [",".join(str(c) for c in header)]
+    lines += [",".join(str(c) for c in r) for r in rows]
+    csv_path.write_text("\n".join(lines) + "\n")
+
+    result = subprocess.run(
+        ["python", "analyze.py", str(csv_path)],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+
+    assert "session 1" in out
+    assert "session 2" in out
+    assert "all sessions" in out
+    # Wilson upper bound should be clamped at 1.000 because every row is a success.
+    assert "1.000]" in out
+
+    # Split the report into per-block lines to inspect per-session settling.
+    blocks = {}
+    current = None
+    for line in out.splitlines():
+        if line.startswith("=== "):
+            current = line
+            blocks[current] = []
+        elif current is not None:
+            blocks[current].append(line)
+
+    def block_with(name):
+        for key, val in blocks.items():
+            if name in key:
+                return "\n".join(val)
+        return ""
+
+    sess1 = block_with("session 1")
+    sess2 = block_with("session 2")
+    assert "from obstacle #0" in sess1, sess1
+    assert "from obstacle #0" in sess2, sess2

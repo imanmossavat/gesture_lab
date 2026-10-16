@@ -112,11 +112,15 @@ Use `--log-latency latency.csv` to write every jump event to disk.
 Use `--log-outcomes path.csv` to write one row per obstacle outcome:
 
 ```text
-t_s, player, mode, d_spawn, d_after, speed, height, width, outcome
+t_s, player, session, mode, d_spawn, d_after, speed, height, width, outcome
 ```
 
 - `t_s` is seconds since the last restart.
 - `player` is set with `--player` (default `anon`).
+- `session` is an integer that increments every time the player changes the
+  difficulty preset (1/2/3) or presses **R** to restart.  Analyze treats each
+  session as a separate run, so settling and tail statistics are computed per
+  session.
 - `mode` is the in-game difficulty preset (1/2/3).
 - `d_spawn` is the controller `d` used to spawn the obstacle.
 - `d_after` is `d` after the controller has processed the outcome.

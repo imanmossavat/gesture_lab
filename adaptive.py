@@ -471,3 +471,25 @@ class LatencyTracker:
         if len(self.values) < 2:
             return 0.0
         return statistics.stdev(self.values)
+
+
+
+class SessionTracker:
+    """Monotonic session counter for logged gameplay segments.
+
+    A new session is started every time the player changes the difficulty
+    preset or restarts the game.  The counter is intentionally simple so it
+    can be unit-tested independently of the event loop.
+    """
+
+    def __init__(self, start: int = 0):
+        self._session = start
+
+    def bump(self) -> int:
+        """Advance to the next session and return its id."""
+        self._session += 1
+        return self._session
+
+    @property
+    def current(self) -> int:
+        return self._session

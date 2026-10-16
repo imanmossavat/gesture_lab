@@ -80,7 +80,8 @@ def cmd_feasibility(args: argparse.Namespace) -> int:
         # Worst-case height with +10% jitter.
         h = profile.height * 1.1
         if args.gap_mode == "schedule":
-            gap_px = profile.speed * profile.spawn_interval
+            jitter_min = cfg.SPAWN_INTERVAL_JITTER[0]
+            gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
         else:  # fixed650
             gap_px = 650.0
         slack_s = gap_px / profile.speed - air

@@ -21,6 +21,7 @@ from adaptive import (
     AdaptiveController,
     Config,
     LatencyTracker,
+    SessionTracker,
     attempt_jump,
     difficulty_profile,
     next_spawn_timer,
@@ -170,10 +171,11 @@ def main():
         outcomes_log = open(args.log_outcomes, "w", newline="")
         outcomes_writer = csv.writer(outcomes_log)
         outcomes_writer.writerow(
-            ["t_s", "player", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
+            ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]
         )
 
     game_start = time.perf_counter()
+    tracker = SessionTracker()
 
     valid_gestures = 0
     accepted_jumps = 0
@@ -212,6 +214,7 @@ def main():
         threshold = settings["threshold"]
         stability = settings["stability"]
         diff_color = settings["color"]
+        tracker.bump()
 
     def reset_game():
         nonlocal player_y, velocity_y, obstacles, spawn_timer
@@ -239,6 +242,7 @@ def main():
         outcomes_writer.writerow([
             f"{t_s:.3f}",
             args.player,
+            tracker.current,
             preset_id,
             f"{ob.d_spawn:.4f}",
             f"{controller.d:.4f}",
