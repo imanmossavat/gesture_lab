@@ -44,6 +44,13 @@ SQRT2 = math.sqrt(2.0)
 LAT_COLS = ["frame_read_to_jump_ms", "first_open_to_jump_ms", "inference_ms", "loop_ms"]
 
 
+def _target_rate(value):
+    v = float(value)
+    if not 0.0 < v < 1.0:
+        raise argparse.ArgumentTypeError(f"target success rate must be in (0, 1), got {v}")
+    return v
+
+
 # ----------------------------------------------------------------- helpers
 def wilson(k, n, z=1.96):
     if n == 0:
@@ -75,8 +82,21 @@ def git_hash():
 
 
 def load(path):
+    meta = {}
     with open(path, newline="") as f:
-        return list(csv.DictReader(f))
+        while True:
+            pos = f.tell()
+            line = f.readline()
+            if line.startswith("#"):
+                body = line[1:].strip()
+                if "=" in body:
+                    k, v = body.split("=", 1)
+                    meta[k.strip()] = v.strip()
+                continue
+            f.seek(pos)
+            break
+        rows = list(csv.DictReader(f))
+    return meta, rows
 
 
 def kind_of(rows):
@@ -86,6 +106,17 @@ def kind_of(rows):
     if "first_open_to_jump_ms" in cols:
         return "latency"
     return None
+
+
+def _meta_line(meta):
+    if not meta:
+        return ""
+    parts = []
+    for k in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
+              "initial_preset", "player", "timestamp", "git_hash"):
+        if k in meta:
+            parts.append(f"{k}={meta[k]}")
+    return "  [" + ", ".join(parts) + "]"
 
 
 # ------------------------------------------------------------- sigma fit
@@ -124,12 +155,14 @@ def fit_sigma(budgets, outs, lo_ms=5, hi_ms=800):
 
 
 # ---------------------------------------------------------- outcome report
-def outcome_group(label, rows, a):
+def outcome_group(label, rows, a, meta=None):
     """Summarise one player/session group. Returns a one-line table row or None."""
     i0 = a.trim_start
     i1 = len(rows) - a.trim_end
     kept = rows[i0:i1] if i1 > i0 else []
     print(f"\n--- {label} ---")
+    if meta:
+        print(_meta_line(meta))
     print(f"rows: {len(rows)} total, {len(kept)} kept "
           f"(trim {a.trim_start} at start, {a.trim_end} at end)")
     n = len(kept)
@@ -210,9 +243,11 @@ def outcome_group(label, rows, a):
 
 
 # ---------------------------------------------------------- latency report
-def latency_group(label, rows, a):
+def latency_group(label, rows, a, meta=None):
     kept = rows[a.trim_start: len(rows) - a.trim_end] if len(rows) - a.trim_end > a.trim_start else []
     print(f"\n--- {label} [latency] ---")
+    if meta:
+        print(_meta_line(meta))
     print(f"rows: {len(rows)} total, {len(kept)} kept")
     if len(kept) < 5:
         print("too few rows after trimming")
@@ -237,7 +272,7 @@ def main():
                     help="drop first N rows of each player/session group (default 10)")
     ap.add_argument("--trim-end", type=int, default=0, metavar="N",
                     help="drop last N rows of each group (default 0)")
-    ap.add_argument("--target", type=float, default=0.75, help="target success rate")
+    ap.add_argument("--target", type=_target_rate, default=0.75, help="target success rate")
     ap.add_argument("--anon", action="store_true", help="replace player names with P1, P2, ...")
     ap.add_argument("--out", metavar="FILE", help="also write the summary to this text file")
     a = ap.parse_args()
@@ -267,7 +302,7 @@ def main():
         return anon_map.setdefault(name, f"P{len(anon_map) + 1}")
 
     for p in a.paths:
-        rows = load(p)
+        meta, rows = load(p)
         kind = kind_of(rows)
         if kind is None:
             print(f"\n{p}: unrecognised columns, skipping")
@@ -275,7 +310,7 @@ def main():
         stem = Path(p).stem
         player = who(rows[0].get("player") or stem)
         if kind == "latency":
-            latency_group(f"{player} / {stem}", rows, a)
+            latency_group(f"{player} / {stem}", rows, a, meta=meta)
             continue
         if "session" in rows[0]:
             groups = {}
@@ -285,11 +320,11 @@ def main():
                 print(f"\nnote: {stem} has {len(groups)} sessions (preset change or restart); "
                       "each is summarised separately")
             for sid in sorted(groups, key=lambda x: int(float(x))):
-                res = outcome_group(f"{player} / {stem} / session {sid}", groups[sid], a)
+                res = outcome_group(f"{player} / {stem} / session {sid}", groups[sid], a, meta=meta)
                 if res:
                     table.append(res)
         else:
-            res = outcome_group(f"{player} / {stem}", rows, a)
+            res = outcome_group(f"{player} / {stem}", rows, a, meta=meta)
             if res:
                 table.append(res)
 

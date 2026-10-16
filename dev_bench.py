@@ -11,8 +11,12 @@ Examples:
     python dev_bench.py compare --output compare.png
 """
 import argparse
+import csv
+import dataclasses
+import datetime
 import math
 import random
+import subprocess
 import sys
 
 from adaptive import (
@@ -25,6 +29,55 @@ from adaptive import (
 )
 
 
+def _closed_unit(name: str):
+    def f(value):
+        v = float(value)
+        if not 0.0 <= v <= 1.0:
+            raise argparse.ArgumentTypeError(f"{name} must be in [0, 1], got {v}")
+        return v
+    return f
+
+
+def _open_unit(name: str):
+    def f(value):
+        v = float(value)
+        if not 0.0 < v < 1.0:
+            raise argparse.ArgumentTypeError(f"{name} must be in (0, 1), got {v}")
+        return v
+    return f
+
+
+def _positive_float_upto_one(name: str):
+    def f(value):
+        v = float(value)
+        if not 0.0 < v <= 1.0:
+            raise argparse.ArgumentTypeError(f"{name} must be in (0, 1], got {v}")
+        return v
+    return f
+
+
+def _git_hash():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _write_csv_meta(file, config, extra=None):
+    """Write config metadata as CSV comment lines before the header."""
+    meta = dict(extra or {})
+    meta["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    meta["git_hash"] = _git_hash()
+    meta["command"] = " ".join(sys.argv)
+    for key, value in dataclasses.asdict(config).items():
+        meta.setdefault(key, value)
+    for key, value in meta.items():
+        file.write(f"# {key}={value}\n")
+
+
 def _simulate(
     config: Config,
     rng: random.Random,
@@ -34,23 +87,27 @@ def _simulate(
     miss_prob: float,
     eta: float | None = None,
     target: float | None = None,
+    start_d: float | None = None,
     seed: int = 42,
 ) -> tuple[AdaptiveController, list[int]]:
     """Run a deterministic player simulation and return the controller + outcomes."""
     ctrl_rng = random.Random(seed)
-    if eta is not None or target is not None:
-        cfg = Config() if eta is None else Config(ADAPTATION_RATE=eta)
-        if target is not None:
-            cfg = Config(
-                ADAPTATION_RATE=cfg.ADAPTATION_RATE,
-                TARGET_SUCCESS_RATE=target,
-            )
-        controller = AdaptiveController(cfg, rng=ctrl_rng)
+    cfg_kwargs: dict[str, float] = {}
+    if eta is not None:
+        cfg_kwargs["ADAPTATION_RATE"] = eta
+    if target is not None:
+        cfg_kwargs["TARGET_SUCCESS_RATE"] = target
+    if start_d is not None:
+        cfg_kwargs["D_START"] = start_d
+    if cfg_kwargs:
+        controller_cfg = Config(**cfg_kwargs)
     else:
-        controller = AdaptiveController(config, rng=ctrl_rng)
+        controller_cfg = config
+    controller = AdaptiveController(controller_cfg, rng=ctrl_rng)
 
-    outcomes = []
-    for _ in range(frames):
+    rows = []
+    for frame in range(frames):
+        d_spawn = controller.d
         profile = difficulty_profile(controller.d, config)
         h = profile.height * rng.uniform(0.9, 1.1)
         w = profile.width
@@ -62,8 +119,19 @@ def _simulate(
             offset_ms = rng.gauss(0.0, sigma)
             success = clears_obstacle(h, w, speed, offset_ms / 1000.0, config)
         controller.update(1 if success else 0)
-        outcomes.append(1 if success else 0)
-    return controller, outcomes
+        rows.append({
+            "t_s": frame,
+            "player": "dev_bench",
+            "session": 1,
+            "mode": 0,
+            "d_spawn": f"{d_spawn:.4f}",
+            "d_after": f"{controller.d:.4f}",
+            "speed": f"{speed:.1f}",
+            "height": f"{h:.1f}",
+            "width": f"{w:.1f}",
+            "outcome": 1 if success else 0,
+        })
+    return controller, rows
 
 
 def cmd_feasibility(args: argparse.Namespace) -> int:
@@ -121,7 +189,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 def cmd_simulate(args: argparse.Namespace) -> int:
     cfg = Config()
     rng = random.Random(args.seed)
-    controller, outcomes = _simulate(
+    controller, rows = _simulate(
         cfg,
         rng,
         frames=args.frames,
@@ -129,7 +197,11 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         latency_jitter_ms=args.latency,
         miss_prob=args.miss,
         seed=args.seed,
+        start_d=args.start_d,
+        eta=args.adaptation_rate,
+        target=args.target_success_rate,
     )
+    outcomes = [int(r["outcome"]) for r in rows]
     overall = sum(outcomes) / len(outcomes)
     tail_n = min(args.tail, len(outcomes))
     tail_rate = sum(outcomes[-tail_n:]) / tail_n
@@ -139,6 +211,28 @@ def cmd_simulate(args: argparse.Namespace) -> int:
     print(f"  overall success = {overall:.3f}")
     print(f"  last {tail_n} success  = {tail_rate:.3f}")
     print(f"  outcomes: {controller.outcomes}  ok={controller.successes}  bad={controller.failures}")
+    if args.csv:
+        controller_cfg = controller.config
+        with open(args.csv, "w", newline="") as f:
+            _write_csv_meta(
+                f, controller_cfg,
+                extra={
+                    "log_type": "bench_simulate",
+                    "seed": args.seed,
+                    "frames": args.frames,
+                    "noise_ms": args.noise,
+                    "latency_jitter_ms": args.latency,
+                    "miss_prob": args.miss,
+                    "tail": args.tail,
+                },
+            )
+            writer = csv.DictWriter(f, fieldnames=[
+                "t_s", "player", "session", "mode", "d_spawn", "d_after",
+                "speed", "height", "width", "outcome",
+            ])
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"  CSV written to {args.csv}")
     return 0
 
 
@@ -146,23 +240,39 @@ def cmd_compare(args: argparse.Namespace) -> int:
     cfg = Config()
     print("Comparing adaptation rates")
     variants = [
-        ("slow", 0.04, cfg.TARGET_SUCCESS_RATE),
-        ("default", cfg.ADAPTATION_RATE, cfg.TARGET_SUCCESS_RATE),
-        ("fast", 0.12, cfg.TARGET_SUCCESS_RATE),
-        ("target=0.80", cfg.ADAPTATION_RATE, 0.80),
+        ("slow", 0.04, cfg.TARGET_SUCCESS_RATE, None),
+        ("default", cfg.ADAPTATION_RATE, cfg.TARGET_SUCCESS_RATE, None),
+        ("fast", 0.12, cfg.TARGET_SUCCESS_RATE, None),
+        ("target=0.80", cfg.ADAPTATION_RATE, 0.80, None),
     ]
+    if (
+        args.start_d is not None
+        or args.adaptation_rate is not None
+        or args.target_success_rate is not None
+    ):
+        variants.append((
+            "custom",
+            args.adaptation_rate if args.adaptation_rate is not None else cfg.ADAPTATION_RATE,
+            args.target_success_rate if args.target_success_rate is not None else cfg.TARGET_SUCCESS_RATE,
+            args.start_d,
+        ))
     print(f"{'variant':>12} {'final d':>8} {'overall':>8} {'last 400':>10}")
-    rows = []
-    for name, eta, target in variants:
+    summary_rows = []
+    all_rows = []
+    for name, eta, target, start_d in variants:
         rng = random.Random(args.seed)
-        controller, outcomes = _simulate(
+        controller, variant_rows = _simulate(
             cfg, rng, args.frames, args.noise, args.latency, args.miss,
-            eta=eta, target=target, seed=args.seed,
+            eta=eta, target=target, start_d=start_d, seed=args.seed,
         )
+        outcomes = [int(r["outcome"]) for r in variant_rows]
         overall = sum(outcomes) / len(outcomes)
         tail_rate = sum(outcomes[-400:]) / 400
         print(f"{name:>12} {controller.d:8.3f} {overall:8.3f} {tail_rate:10.3f}")
-        rows.append((name, overall, tail_rate))
+        summary_rows.append((name, overall, tail_rate))
+        for r in variant_rows:
+            r["variant"] = name
+            all_rows.append(r)
 
     if args.output:
         try:
@@ -191,6 +301,16 @@ def cmd_compare(args: argparse.Namespace) -> int:
             print(f"Saved plot to {args.output}")
         except Exception as exc:
             print(f"Could not save plot: {exc}", file=sys.stderr)
+    if args.csv:
+        with open(args.csv, "w", newline="") as f:
+            _write_csv_meta(f, cfg, extra={"log_type": "bench_compare", "seed": args.seed})
+            writer = csv.DictWriter(f, fieldnames=[
+                "t_s", "player", "session", "mode", "variant", "d_spawn", "d_after",
+                "speed", "height", "width", "outcome",
+            ])
+            writer.writeheader()
+            writer.writerows(all_rows)
+        print(f"CSV written to {args.csv}")
     return 0
 
 
@@ -199,16 +319,25 @@ def cmd_latency_report(args: argparse.Namespace) -> int:
     latencies = list(range(0, args.max_latency + 1, args.step))
     print("Latency impact (fixed timing noise = 80 ms, miss = 5%)")
     print(f"{'latency_ms':>10} {'final d':>8} {'overall':>8} {'last 400':>10}")
-    rows = []
+    summary_rows = []
+    all_rows = []
     for lat in latencies:
         rng = random.Random(args.seed)
-        controller, outcomes = _simulate(
-            cfg, rng, args.frames, args.noise, lat, args.miss, seed=args.seed,
+        controller, lat_rows = _simulate(
+            cfg, rng, args.frames, args.noise, lat, args.miss,
+            seed=args.seed,
+            start_d=args.start_d,
+            eta=args.adaptation_rate,
+            target=args.target_success_rate,
         )
+        outcomes = [int(r["outcome"]) for r in lat_rows]
         overall = sum(outcomes) / len(outcomes)
         tail_rate = sum(outcomes[-400:]) / 400
         print(f"{lat:>10} {controller.d:8.3f} {overall:8.3f} {tail_rate:10.3f}")
-        rows.append((lat, overall, tail_rate, controller.d))
+        summary_rows.append((lat, overall, tail_rate, controller.d))
+        for r in lat_rows:
+            r["latency_ms"] = lat
+            all_rows.append(r)
 
     if args.output:
         try:
@@ -219,13 +348,13 @@ def cmd_latency_report(args: argparse.Namespace) -> int:
 
             xs = [r[0] for r in rows]
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
-            ax1.plot(xs, [r[1] for r in rows], label="overall")
-            ax1.plot(xs, [r[2] for r in rows], label="last 400")
+            ax1.plot(xs, [r[1] for r in summary_rows], label="overall")
+            ax1.plot(xs, [r[2] for r in summary_rows], label="last 400")
             ax1.axhline(cfg.TARGET_SUCCESS_RATE, color="red", linestyle="--")
             ax1.set_ylabel("success rate")
             ax1.set_ylim(0, 1)
             ax1.legend()
-            ax2.plot(xs, [r[3] for r in rows], color="green")
+            ax2.plot(xs, [r[3] for r in summary_rows], color="green")
             ax2.set_xlabel("end-to-end latency jitter (ms)")
             ax2.set_ylabel("final difficulty d")
             ax2.set_ylim(0, 1)
@@ -234,6 +363,27 @@ def cmd_latency_report(args: argparse.Namespace) -> int:
             print(f"Saved plot to {args.output}")
         except Exception as exc:
             print(f"Could not save plot: {exc}", file=sys.stderr)
+    if args.csv:
+        controller_cfg = controller.config
+        with open(args.csv, "w", newline="") as f:
+            _write_csv_meta(
+                f, controller_cfg,
+                extra={
+                    "log_type": "bench_latency_report",
+                    "seed": args.seed,
+                    "max_latency": args.max_latency,
+                    "step": args.step,
+                    "noise_ms": args.noise,
+                    "miss_prob": args.miss,
+                },
+            )
+            writer = csv.DictWriter(f, fieldnames=[
+                "t_s", "player", "session", "mode", "latency_ms", "d_spawn", "d_after",
+                "speed", "height", "width", "outcome",
+            ])
+            writer.writeheader()
+            writer.writerows(all_rows)
+        print(f"CSV written to {args.csv}")
     return 0
 
 
@@ -272,6 +422,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim.add_argument("--miss", type=float, default=0.05)
     p_sim.add_argument("--seed", type=int, default=42)
     p_sim.add_argument("--tail", type=int, default=400)
+    p_sim.add_argument("--start-d", type=_closed_unit("--start-d"), default=None, help="initial d (0-1)")
+    p_sim.add_argument("--adaptation-rate", type=_positive_float_upto_one("--adaptation-rate"), default=None, help="controller learning rate (0-1]")
+    p_sim.add_argument("--target-success-rate", type=_open_unit("--target-success-rate"), default=None, help="target success rate (0-1)")
+    p_sim.add_argument("--csv", type=str, default=None, help="write per-obstacle rows to CSV")
     p_sim.set_defaults(func=cmd_simulate)
 
     p_comp = sub.add_parser("compare", help="compare controller tuning variants")
@@ -281,6 +435,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_comp.add_argument("--miss", type=float, default=0.05)
     p_comp.add_argument("--seed", type=int, default=42)
     p_comp.add_argument("--output", type=str, default=None)
+    p_comp.add_argument("--start-d", type=_closed_unit("--start-d"), default=None, help="initial d for the custom variant (0-1)")
+    p_comp.add_argument("--adaptation-rate", type=_positive_float_upto_one("--adaptation-rate"), default=None, help="learning rate for the custom variant (0-1]")
+    p_comp.add_argument("--target-success-rate", type=_open_unit("--target-success-rate"), default=None, help="target success rate for the custom variant (0-1)")
+    p_comp.add_argument("--csv", type=str, default=None, help="write per-obstacle rows to CSV")
     p_comp.set_defaults(func=cmd_compare)
 
     p_lat = sub.add_parser("latency-report", help="sweep latency and report success rates")
@@ -291,6 +449,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_lat.add_argument("--step", type=int, default=20)
     p_lat.add_argument("--seed", type=int, default=42)
     p_lat.add_argument("--output", type=str, default=None)
+    p_lat.add_argument("--start-d", type=_closed_unit("--start-d"), default=None, help="initial d (0-1)")
+    p_lat.add_argument("--adaptation-rate", type=_positive_float_upto_one("--adaptation-rate"), default=None, help="controller learning rate (0-1]")
+    p_lat.add_argument("--target-success-rate", type=_open_unit("--target-success-rate"), default=None, help="target success rate (0-1)")
+    p_lat.add_argument("--csv", type=str, default=None, help="write per-obstacle rows to CSV")
     p_lat.set_defaults(func=cmd_latency_report)
 
     p_play = sub.add_parser("play", help="note about interactive play")

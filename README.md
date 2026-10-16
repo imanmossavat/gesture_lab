@@ -165,6 +165,10 @@ python dev_bench.py latency-report --max-latency 200 --output latency.png
 python dev_bench.py play   # explains that play mode lives in game.py
 ```
 
+Bench CSVs written with `--csv` include a metadata header containing the full
+`Config` used, so `analyze.py` and `summarize.py` can show which tuning
+parameters produced the numbers.
+
 ## Notebook
 
 Open `gesture_landmarks_lab.ipynb` in VS Code or Jupyter:

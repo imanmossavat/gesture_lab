@@ -386,7 +386,9 @@ class AdaptiveController:
     ):
         self.config = config or Config()
         self.rng = rng or random.Random()
-        self.d = self.config.D_START
+        self.d = _clamp(
+            self.config.D_START, self.config.D_MIN, self.config.D_MAX
+        )
         self.successes = 0
         self.failures = 0
         self.outcomes = 0
@@ -410,7 +412,9 @@ class AdaptiveController:
         return self.d
 
     def reset(self) -> None:
-        self.d = self.config.D_START
+        self.d = _clamp(
+            self.config.D_START, self.config.D_MIN, self.config.D_MAX
+        )
         self.successes = 0
         self.failures = 0
         self.outcomes = 0

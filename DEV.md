@@ -133,6 +133,20 @@ python analyze.py run1.csv
 python analyze.py run1.csv --plot report.png
 ```
 
+### Run metadata in CSV outputs
+
+`--log-outcomes` and `--log-latency` write a metadata block as leading `# key=value`
+comment lines before the CSV header.  The block contains:
+
+- run context: `log_type`, `player`, `initial_preset`, `effective_start_d`,
+  `timestamp`, `git_hash`, `command`
+- every tunable field from the active `Config` (e.g. `ADAPTATION_RATE`,
+  `TARGET_SUCCESS_RATE`, `D_START`, `RECENT_WINDOW`, `SPEED_MIN/MAX`, ...)
+
+`analyze.py` and `summarize.py` read these comments and show the tuning
+parameters with each report, so it is always clear which configuration produced
+the numbers.
+
 ## Running checks
 
 ```bash
@@ -145,8 +159,13 @@ SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120
 # Tune the difficulty model
 python dev_bench.py feasibility
 python dev_bench.py sweep
-python dev_bench.py simulate --frames 2000 --noise 80 --latency 90
-python dev_bench.py latency-report --max-latency 200 --output latency.png
+python dev_bench.py simulate --frames 2000 --noise 80 --latency 90 --csv simulate.csv
+python dev_bench.py compare --output compare.png --csv compare.csv
+python dev_bench.py latency-report --max-latency 200 --output latency.png --csv latency.csv
+
+# Consume the resulting CSVs
+python analyze.py simulate.csv
+python summarize.py simulate.csv
 ```
 
 ## What is theoretical / not calibrated

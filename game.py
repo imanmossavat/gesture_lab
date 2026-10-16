@@ -9,8 +9,13 @@ Controls:
     Q / Esc    : quit
 """
 import argparse
+import copy
 import csv
+import dataclasses
+import datetime
 import random
+import subprocess
+import sys
 import time
 
 import cv2
@@ -37,18 +42,52 @@ FPS_TARGET = 60
 # Presets only affect the starting d, the classifier threshold, the stability
 # requirement, and the UI colour.  All runtime parameters come from
 # difficulty_profile(d).
+# The initial preset and its starting d can be overridden from the command line
+# with --preset and --start-d.
 PRESETS = {
     1: {"d": 0.25, "threshold": 0.50, "stability": 1, "color": (120, 220, 120)},
     2: {"d": 0.50, "threshold": 0.60, "stability": 2, "color": (255, 200, 90)},
     3: {"d": 0.75, "threshold": 0.70, "stability": 3, "color": (255, 110, 110)},
 }
 
+
+def build_presets(start_d=None, preset_id=2, base=PRESETS):
+    """Return a deep copy of PRESETS with an optional initial-d override."""
+    presets = copy.deepcopy(base)
+    if start_d is not None:
+        presets[preset_id]["d"] = start_d
+    return presets
+
+
+def _git_hash():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _write_csv_meta(file, config, extra=None):
+    """Write config metadata as CSV comment lines before the header."""
+    meta = dict(extra or {})
+    meta["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    meta["git_hash"] = _git_hash()
+    meta["command"] = " ".join(sys.argv)
+    for key, value in dataclasses.asdict(config).items():
+        meta.setdefault(key, value)
+    for key, value in meta.items():
+        file.write(f"# {key}={value}\n")
+
+
 class GameState:
     """Encapsulates the mutable game/session state so it can be unit-tested."""
 
-    def __init__(self, controller, config):
+    def __init__(self, controller, config, presets=None, start_preset=2):
         self.controller = controller
         self.config = config
+        self.presets = presets if presets is not None else PRESETS
         self.ground_y = 590
         self.player_x = 620
         self.player_w = 42
@@ -57,10 +96,10 @@ class GameState:
         self.jump_velocity = -690.0
         self.tracker = SessionTracker()
         self.game_start = time.perf_counter()
-        self.preset_id = 2
-        self.threshold = PRESETS[self.preset_id]["threshold"]
-        self.stability = PRESETS[self.preset_id]["stability"]
-        self.diff_color = PRESETS[self.preset_id]["color"]
+        self.preset_id = start_preset
+        self.threshold = self.presets[self.preset_id]["threshold"]
+        self.stability = self.presets[self.preset_id]["stability"]
+        self.diff_color = self.presets[self.preset_id]["color"]
         self.player_y = self.ground_y - self.player_h
         self.velocity_y = 0.0
         self.obstacles = []
@@ -73,7 +112,7 @@ class GameState:
 
     def set_preset(self, pid):
         self.preset_id = pid
-        settings = PRESETS[pid]
+        settings = self.presets[pid]
         self.controller.d = settings["d"]
         self.threshold = settings["threshold"]
         self.stability = settings["stability"]
@@ -114,6 +153,39 @@ class DummyCapture:
         pass
 
 
+def _float_in_closed_range(lo, hi, name):
+    def f(value):
+        v = float(value)
+        if not lo <= v <= hi:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be between {lo} and {hi}, got {v}"
+            )
+        return v
+    return f
+
+
+def _float_in_open_range(lo, hi, name):
+    def f(value):
+        v = float(value)
+        if not lo < v < hi:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be strictly between {lo} and {hi}, got {v}"
+            )
+        return v
+    return f
+
+
+def _positive_float_upto_one(name):
+    def f(value):
+        v = float(value)
+        if not 0.0 < v <= 1.0:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be > 0 and <= 1, got {v}"
+            )
+        return v
+    return f
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Gesture-controlled runner")
     parser.add_argument(
@@ -121,6 +193,31 @@ def parse_args():
         type=int,
         default=0,
         help="Camera index (0 on most Macs/Windows, sometimes 1)",
+    )
+    parser.add_argument(
+        "--preset",
+        type=int,
+        choices=(1, 2, 3),
+        default=2,
+        help="Starting difficulty preset (default 2)",
+    )
+    parser.add_argument(
+        "--start-d",
+        type=_float_in_closed_range(0.0, 1.0, "--start-d"),
+        default=None,
+        help="Override the initial d for the starting preset (0-1)",
+    )
+    parser.add_argument(
+        "--adaptation-rate",
+        type=_positive_float_upto_one("--adaptation-rate"),
+        default=Config.ADAPTATION_RATE,
+        help="Controller adaptation rate / learning rate (default 0.08)",
+    )
+    parser.add_argument(
+        "--target-success-rate",
+        type=_float_in_open_range(0.0, 1.0, "--target-success-rate"),
+        default=Config.TARGET_SUCCESS_RATE,
+        help="Target success rate for the controller (default 0.75)",
     )
     parser.add_argument(
         "--dummy-camera",
@@ -197,10 +294,15 @@ def main():
     classifier = RuleClassifier()
 
     # Adaptive-difficulty state
-    config = Config()
+    config = Config(
+        ADAPTATION_RATE=args.adaptation_rate,
+        TARGET_SUCCESS_RATE=args.target_success_rate,
+        D_START=args.start_d if args.start_d is not None else Config.D_START,
+    )
     rng = random.Random()
     controller = AdaptiveController(config, rng=rng)
-    state = GameState(controller, config)
+    presets = build_presets(args.start_d, args.preset)
+    state = GameState(controller, config, presets=presets, start_preset=args.preset)
 
     # Latency diagnostics (rolling windows + counters)
     frame_to_jump = LatencyTracker(config.LATENCY_WINDOW)
@@ -210,6 +312,10 @@ def main():
     latency_log = None
     if args.log_latency:
         latency_log = open(args.log_latency, "w", newline="")
+        _write_csv_meta(
+            latency_log, config,
+            extra={"log_type": "latency", "player": args.player},
+        )
         latency_writer = csv.writer(latency_log)
         latency_writer.writerow(
             ["frame_read_to_jump_ms", "first_open_to_jump_ms", "inference_ms", "loop_ms", "accepted"]
@@ -221,6 +327,15 @@ def main():
     outcomes_writer = None
     if args.log_outcomes:
         outcomes_log = open(args.log_outcomes, "w", newline="")
+        _write_csv_meta(
+            outcomes_log, config,
+            extra={
+                "log_type": "outcomes",
+                "player": args.player,
+                "initial_preset": args.preset,
+                "effective_start_d": f"{controller.d:.4f}",
+            },
+        )
         outcomes_writer = csv.writer(outcomes_log)
         outcomes_writer.writerow(
             ["t_s", "player", "session", "mode", "d_spawn", "d_after", "speed", "height", "width", "outcome"]

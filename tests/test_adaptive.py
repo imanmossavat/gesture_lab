@@ -420,7 +420,11 @@ def test_game_outcomes_csv_and_analyze(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     text = out.read_text()
-    assert text.startswith("t_s,player,session,mode,d_spawn,d_after,speed,height,width,outcome")
+    header = "t_s,player,session,mode,d_spawn,d_after,speed,height,width,outcome"
+    assert header in text, text[:200]
+    for key in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
+                "initial_preset", "git_hash", "timestamp"):
+        assert f"# {key}=" in text, key
     rows = list(csv.reader(text.splitlines()))
     assert len(rows) > 1
 
@@ -561,3 +565,84 @@ def test_analyze_multi_session_plot(tmp_path):
     # Pooled summary should not produce a plot file.
     assert not (tmp_path / "report_all sessions.png").exists()
     assert not (tmp_path / "report_all_sessions.png").exists()
+
+
+
+# ---------------------------------------------------------------------------
+# Run metadata in CSV outputs
+# ---------------------------------------------------------------------------
+
+def test_dev_bench_simulate_writes_metadata(tmp_path):
+    """dev_bench simulate --csv emits config metadata as leading comments."""
+    csv_path = tmp_path / "sim.csv"
+    result = subprocess.run(
+        [
+            "python", "dev_bench.py", "simulate",
+            "--frames", "200", "--noise", "60", "--latency", "50", "--miss", "0.05",
+            "--start-d", "0.2", "--adaptation-rate", "0.06", "--target-success-rate", "0.8",
+            "--csv", str(csv_path),
+        ],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    text = csv_path.read_text()
+    assert "t_s,player,session,mode,d_spawn,d_after,speed,height,width,outcome" in text
+    for key in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "seed", "noise_ms",
+                "latency_jitter_ms", "miss_prob", "git_hash", "timestamp"):
+        assert f"# {key}=" in text, key
+    assert "# ADAPTATION_RATE=0.06" in text
+    assert "# TARGET_SUCCESS_RATE=0.8" in text
+    assert "# D_START=0.2" in text
+
+
+def test_analyze_and_summarize_read_metadata(tmp_path):
+    """analyze.py and summarize.py surface run metadata from dev_bench CSVs."""
+    csv_path = tmp_path / "sim.csv"
+    subprocess.run(
+        [
+            "python", "dev_bench.py", "simulate",
+            "--frames", "200", "--adaptation-rate", "0.06", "--target-success-rate", "0.8",
+            "--csv", str(csv_path),
+        ],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    analyze = subprocess.run(
+        ["python", "analyze.py", str(csv_path)],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert analyze.returncode == 0, analyze.stderr
+    assert "metadata:" in analyze.stdout
+    assert "ADAPTATION_RATE = 0.06" in analyze.stdout
+    assert "TARGET_SUCCESS_RATE = 0.8" in analyze.stdout
+
+    summarize = subprocess.run(
+        ["python", "summarize.py", str(csv_path)],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    assert summarize.returncode == 0, summarize.stderr
+    assert "ADAPTATION_RATE=0.06" in summarize.stdout
+    assert "TARGET_SUCCESS_RATE=0.8" in summarize.stdout
+
+
+def test_simulate_returns_obstacle_rows():
+    """_simulate now returns per-obstacle rows, not just outcome integers."""
+    from dev_bench import _simulate
+    cfg = Config()
+    rng = random.Random(7)
+    controller, rows = _simulate(
+        cfg, rng, frames=50, timing_noise_ms=40.0, latency_jitter_ms=30.0, miss_prob=0.0, seed=7,
+    )
+    assert len(rows) == 50
+    assert all(r["outcome"] in (0, 1) for r in rows)
+    assert all("d_spawn" in r and "d_after" in r for r in rows)
+    assert controller.outcomes == 50

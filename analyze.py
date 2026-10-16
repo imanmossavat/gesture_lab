@@ -27,6 +27,15 @@ import sys
 from pathlib import Path
 
 LAT_COLS = ["frame_read_to_jump_ms", "first_open_to_jump_ms", "inference_ms", "loop_ms"]
+
+
+def _target_rate(value):
+    v = float(value)
+    if not 0.0 < v < 1.0:
+        raise argparse.ArgumentTypeError(f"target success rate must be in (0, 1), got {v}")
+    return v
+
+
 BAND = 0.15        # "settled" means d stays within +-BAND of its late-session mean
 MIN_BIN_N = 10     # bins with fewer obstacles are shown but not used for conclusions
 
@@ -67,8 +76,21 @@ def robust_sd(v):
 
 
 def load(path):
+    meta = {}
     with open(path, newline="") as f:
-        return list(csv.DictReader(f))
+        while True:
+            pos = f.tell()
+            line = f.readline()
+            if line.startswith("#"):
+                body = line[1:].strip()
+                if "=" in body:
+                    k, v = body.split("=", 1)
+                    meta[k.strip()] = v.strip()
+                continue
+            f.seek(pos)
+            break
+        rows = list(csv.DictReader(f))
+    return meta, rows
 
 
 def kind_of(rows):
@@ -361,7 +383,7 @@ def main():
     ap.add_argument("--trim-end", type=int, default=0, metavar="N", help="drop last N rows")
     ap.add_argument("--trim-start-s", type=float, default=0.0, metavar="S", help="drop rows before t_s = S")
     ap.add_argument("--trim-end-s", type=float, default=0.0, metavar="S", help="drop the last S seconds")
-    ap.add_argument("--target", type=float, default=0.75, help="target success rate (default 0.75)")
+    ap.add_argument("--target", type=_target_rate, default=0.75, help="target success rate (default 0.75)")
     ap.add_argument("--tail", type=int, default=30, help="obstacles used for the late-session d (default 30)")
     ap.add_argument("--window", type=int, default=20, help="rolling success window (default 20)")
     ap.add_argument("--plot", metavar="PNG", help="save plots; one file per input: <stem>_<input>.png")
@@ -369,8 +391,14 @@ def main():
 
     pooled_rows = []
     for p in a.paths:
-        rows = load(p)
+        meta, rows = load(p)
         kind = kind_of(rows)
+        if meta:
+            print(f"\n{Path(p).name} metadata:")
+            for k in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
+                      "initial_preset", "player", "timestamp", "git_hash"):
+                if k in meta:
+                    print(f"  {k} = {meta[k]}")
         if kind is None:
             print(f"\n{p}: unrecognised columns, skipping")
             continue
