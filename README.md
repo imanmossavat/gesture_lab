@@ -2,11 +2,12 @@
 
 A small, educational hand-gesture project for students.
 
-It contains three parts that share the same gesture code:
+It contains four parts that share the same gesture code:
 
 1. **`game.py`** — a runner controlled by an open hand, now with adaptive difficulty.
 2. **`dev_bench.py`** — a headless bench for tuning the difficulty system without a camera.
-3. **`gesture_landmarks_lab.ipynb`** — a guided Jupyter notebook that shows how MediaPipe landmarks are detected, normalised, and turned into a gesture decision.
+3. **`analyze.py`** — reads latency or outcome CSVs and prints per-session statistics and plots.
+4. **`gesture_landmarks_lab.ipynb`** — a guided Jupyter notebook that shows how MediaPipe landmarks are detected, normalised, and turned into a gesture decision.
 
 No model training is required. The classifier is a small set of hand-written rules.
 
@@ -78,6 +79,8 @@ python game.py
 
 The jump fires only once per stable open-hand gesture. Close your hand to re-arm it.
 
+Preset changes (**1/2/3**) and restarts (**R**) also start a new session: obstacles are cleared, the spawn timer is reset, and the `session` column in the outcome log increments.
+
 ## Adaptive difficulty
 
 The game now uses a physics-informed adaptive controller instead of fixed speed tiers.
@@ -98,6 +101,42 @@ See `DEV.md` for the full design, tuning notes, and formulas.
 | Easy | 0.25 | 1 | 0.50 |
 | Normal | 0.50 | 2 | 0.60 |
 | Hard | 0.75 | 3 | 0.70 |
+
+## Collecting data
+
+The game can write every obstacle outcome to a CSV file for later analysis.
+
+```bash
+mkdir -p data
+python game.py --log-outcomes data/alice_2026-10-16.csv --player alice
+```
+
+The log is written continuously; press **Q** or **Esc** to stop. Each row records:
+
+```text
+t_s, player, session, mode, d_spawn, d_after, speed, height, width, outcome
+```
+
+- `session` increments every time you press **1/2/3** or **R**, so each preset block or restart becomes its own session.
+- `mode` is the preset used (1 = easy, 2 = normal, 3 = hard).
+- `d_spawn` is the difficulty `d` when the obstacle was spawned.
+- `outcome` is `1` for a clear and `0` for a crash.
+
+Analyze the file with:
+
+```bash
+python analyze.py data/alice_2026-10-16.csv
+python analyze.py data/alice_2026-10-16.csv --plot report.png
+```
+
+For multi-session files `--plot` writes one image per session (`report_alice_2026-10-16_s1.png`, `report_alice_2026-10-16_s2.png`, ...) plus a pooled text summary. Trim noisy starts/ends with:
+
+```bash
+python analyze.py data/alice_2026-10-16.csv --trim-start 3 --trim-end 3
+python analyze.py data/alice_2026-10-16.csv --trim-start-s 10 --trim-end-s 10
+```
+
+See `DEV.md` for the full log format and tuning notes.
 
 ## Headless smoke test
 
@@ -160,6 +199,7 @@ pytest -q
 - `adaptive.py` — pure-Python adaptive difficulty logic.
 - `mp_compat.py` — MediaPipe legacy-solutions compatibility shim.
 - `dev_bench.py` — headless tuning bench.
+- `analyze.py` — reads latency / outcome CSVs and prints reports and plots.
 - `gesture_lib.py` — landmark conversion, normalisation, and rule-based classifier.
 - `gesture_landmarks_lab.ipynb` — educational notebook.
 - `tests/` — pytest tests.
