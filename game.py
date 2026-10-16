@@ -186,6 +186,17 @@ def _positive_float_upto_one(name):
     return f
 
 
+def _float_in_half_open_range(lo, hi, name):
+    def f(value):
+        v = float(value)
+        if not lo <= v < hi:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be >= {lo} and < {hi}, got {v}"
+            )
+        return v
+    return f
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Gesture-controlled runner")
     parser.add_argument(
@@ -212,6 +223,13 @@ def parse_args():
         type=_positive_float_upto_one("--adaptation-rate"),
         default=Config.ADAPTATION_RATE,
         help="Controller adaptation rate / learning rate (default 0.08)",
+    )
+    parser.add_argument(
+        "--momentum",
+        type=_float_in_half_open_range(0.0, 1.0, "--momentum"),
+        default=Config.MOMENTUM,
+        help="Controller momentum, independent of the learning rate "
+             "(0 <= m < 1, default 0 = off)",
     )
     parser.add_argument(
         "--target-success-rate",
@@ -296,6 +314,7 @@ def main():
     # Adaptive-difficulty state
     config = Config(
         ADAPTATION_RATE=args.adaptation_rate,
+        MOMENTUM=args.momentum,
         TARGET_SUCCESS_RATE=args.target_success_rate,
         D_START=args.start_d if args.start_d is not None else Config.D_START,
     )

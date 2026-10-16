@@ -74,6 +74,52 @@ def test_success_and_failure_deltas():
     assert c.d == pytest.approx(0.46)  # -0.06
 
 
+def test_zero_momentum_matches_original_update():
+    c = AdaptiveController(Config(MOMENTUM=0.0))
+    for outcome, expected in [(1, 0.52), (0, 0.46), (1, 0.48)]:
+        c.update(outcome)
+        assert c.d == pytest.approx(expected)
+
+
+def test_momentum_first_step_matches_plain_update_then_keeps_moving():
+    plain = AdaptiveController(Config(MOMENTUM=0.0))
+    mom = AdaptiveController(Config(MOMENTUM=0.8))
+    plain.update(0)
+    mom.update(0)
+    assert mom.d == pytest.approx(plain.d)  # velocity starts at zero
+    plain.update(0)
+    mom.update(0)
+    assert mom.d < plain.d  # accumulated velocity pushes further
+
+
+def test_momentum_carries_through_after_streak_ends():
+    c = AdaptiveController(Config(MOMENTUM=0.8))
+    for _ in range(3):  # keep d away from the lower bound
+        c.update(0)
+    d_before = c.d
+    c.update(1)  # a success, but velocity is still negative
+    assert c.d < d_before
+
+
+def test_momentum_long_run_gain_is_eta_over_one_minus_beta():
+    # Learning rate and momentum are independent; a streak settles at eta/(1-beta).
+    c = AdaptiveController(Config(MOMENTUM=0.8, D_START=0.0))
+    c = AdaptiveController(Config(MOMENTUM=0.8, D_START=0.0, D_MAX=100.0))
+    for _ in range(60):
+        c.update(1)
+    assert c.velocity == pytest.approx(0.08 * 0.25 / (1 - 0.8), rel=1e-2)
+
+
+def test_momentum_velocity_zeroed_at_bounds_and_reset():
+    c = AdaptiveController(Config(MOMENTUM=0.9, D_START=0.0))
+    c.update(0)
+    assert c.d == 0.0 and c.velocity == 0.0
+    c.update(1)
+    c.velocity = 0.3
+    c.reset()
+    assert c.velocity == 0.0
+
+
 def test_controller_clamps_at_bounds():
     c = AdaptiveController(Config(D_START=1.0))
     c.update(1)
@@ -580,6 +626,7 @@ def test_dev_bench_simulate_writes_metadata(tmp_path):
             "python", "dev_bench.py", "simulate",
             "--frames", "200", "--noise", "60", "--latency", "50", "--miss", "0.05",
             "--start-d", "0.2", "--adaptation-rate", "0.06", "--target-success-rate", "0.8",
+            "--momentum", "0.5",
             "--csv", str(csv_path),
         ],
         cwd=str(Path(__file__).resolve().parent.parent),
@@ -595,6 +642,7 @@ def test_dev_bench_simulate_writes_metadata(tmp_path):
     assert "# ADAPTATION_RATE=0.06" in text
     assert "# TARGET_SUCCESS_RATE=0.8" in text
     assert "# D_START=0.2" in text
+    assert "# MOMENTUM=0.5" in text
 
 
 def test_analyze_and_summarize_read_metadata(tmp_path):
@@ -604,6 +652,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
         [
             "python", "dev_bench.py", "simulate",
             "--frames", "200", "--adaptation-rate", "0.06", "--target-success-rate", "0.8",
+            "--momentum", "0.5",
             "--csv", str(csv_path),
         ],
         cwd=str(Path(__file__).resolve().parent.parent),
@@ -621,6 +670,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
     assert analyze.returncode == 0, analyze.stderr
     assert "metadata:" in analyze.stdout
     assert "ADAPTATION_RATE = 0.06" in analyze.stdout
+    assert "MOMENTUM = 0.5" in analyze.stdout
     assert "TARGET_SUCCESS_RATE = 0.8" in analyze.stdout
 
     summarize = subprocess.run(
@@ -631,6 +681,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
     )
     assert summarize.returncode == 0, summarize.stderr
     assert "ADAPTATION_RATE=0.06" in summarize.stdout
+    assert "MOMENTUM=0.5" in summarize.stdout
     assert "TARGET_SUCCESS_RATE=0.8" in summarize.stdout
 
 

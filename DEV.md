@@ -141,7 +141,7 @@ comment lines before the CSV header.  The block contains:
 - run context: `log_type`, `player`, `initial_preset`, `effective_start_d`,
   `timestamp`, `git_hash`, `command`
 - every tunable field from the active `Config` (e.g. `ADAPTATION_RATE`,
-  `TARGET_SUCCESS_RATE`, `D_START`, `RECENT_WINDOW`, `SPEED_MIN/MAX`, ...)
+  `MOMENTUM`, `TARGET_SUCCESS_RATE`, `D_START`, `RECENT_WINDOW`, `SPEED_MIN/MAX`, ...)
 
 `analyze.py` and `summarize.py` read these comments and show the tuning
 parameters with each report, so it is always clear which configuration produced

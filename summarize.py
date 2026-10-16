@@ -112,7 +112,7 @@ def _meta_line(meta):
     if not meta:
         return ""
     parts = []
-    for k in ("ADAPTATION_RATE", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
+    for k in ("ADAPTATION_RATE", "MOMENTUM", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
               "initial_preset", "player", "timestamp", "git_hash"):
         if k in meta:
             parts.append(f"{k}={meta[k]}")

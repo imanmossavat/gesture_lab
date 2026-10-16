@@ -53,6 +53,11 @@ class Config:
     # Controller -- theoretical choices, not calibrated.
     TARGET_SUCCESS_RATE: float = 0.75
     ADAPTATION_RATE: float = 0.08
+    # Momentum (beta) in [0, 1). 0.0 = original memoryless update. Independent of
+    # ADAPTATION_RATE (the learning rate): each step is added to a running
+    # velocity that decays by beta, so streaks accelerate d and single outcomes
+    # are smoothed. Long-run gain is ADAPTATION_RATE / (1 - MOMENTUM).
+    MOMENTUM: float = 0.0
     D_MIN: float = 0.0
     D_MAX: float = 1.0
     D_START: float = 0.5
@@ -371,10 +376,15 @@ class AdaptiveController:
     """Target-success-rate controller.
 
     The update rule is
-        d <- clip(d + ETA * (outcome - P_TARGET))
-    where outcome is 1 for success and 0 for failure.
+        v <- BETA * v + ETA * (outcome - P_TARGET)
+        d <- clip(d + v)
+    where outcome is 1 for success and 0 for failure, ETA is the learning rate
+    (ADAPTATION_RATE) and BETA is MOMENTUM.  The two are independent
+    hyperparameters; with momentum a steady streak moves d by about
+    ETA / (1 - BETA) per step, so lower ETA when raising BETA.
+    If d hits a bound, v is zeroed so the velocity cannot wind up against it.
 
-    With the default ETA = 0.08 and P_TARGET = 0.75:
+    With the default BETA = 0 (no momentum), ETA = 0.08 and P_TARGET = 0.75:
         success: d += +0.02
         crash:   d += -0.06
 
@@ -389,6 +399,7 @@ class AdaptiveController:
         self.d = _clamp(
             self.config.D_START, self.config.D_MIN, self.config.D_MAX
         )
+        self.velocity = 0.0
         self.successes = 0
         self.failures = 0
         self.outcomes = 0
@@ -398,11 +409,12 @@ class AdaptiveController:
         if outcome not in (0, 1):
             raise ValueError("outcome must be 0 (failure) or 1 (success)")
         cfg = self.config
-        self.d = _clamp(
-            self.d + cfg.ADAPTATION_RATE * (outcome - cfg.TARGET_SUCCESS_RATE),
-            cfg.D_MIN,
-            cfg.D_MAX,
-        )
+        step = cfg.ADAPTATION_RATE * (outcome - cfg.TARGET_SUCCESS_RATE)
+        self.velocity = cfg.MOMENTUM * self.velocity + step
+        proposed = self.d + self.velocity
+        self.d = _clamp(proposed, cfg.D_MIN, cfg.D_MAX)
+        if self.d != proposed:  # hit a bound: stop velocity winding up
+            self.velocity = 0.0
         if outcome:
             self.successes += 1
         else:
@@ -415,6 +427,7 @@ class AdaptiveController:
         self.d = _clamp(
             self.config.D_START, self.config.D_MIN, self.config.D_MAX
         )
+        self.velocity = 0.0
         self.successes = 0
         self.failures = 0
         self.outcomes = 0

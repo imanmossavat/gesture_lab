@@ -47,6 +47,15 @@ def _open_unit(name: str):
     return f
 
 
+def _half_open_unit(name: str):
+    def f(value):
+        v = float(value)
+        if not 0.0 <= v < 1.0:
+            raise argparse.ArgumentTypeError(f"{name} must be in [0, 1), got {v}")
+        return v
+    return f
+
+
 def _positive_float_upto_one(name: str):
     def f(value):
         v = float(value)
@@ -88,9 +97,10 @@ def _simulate(
     eta: float | None = None,
     target: float | None = None,
     start_d: float | None = None,
+    momentum: float | None = None,
     seed: int = 42,
 ) -> tuple[AdaptiveController, list[int]]:
-    """Run a deterministic player simulation and return the controller + outcomes."""
+    """Run a deterministic player simulation and return the controller + per-obstacle rows."""
     ctrl_rng = random.Random(seed)
     cfg_kwargs: dict[str, float] = {}
     if eta is not None:
@@ -99,6 +109,8 @@ def _simulate(
         cfg_kwargs["TARGET_SUCCESS_RATE"] = target
     if start_d is not None:
         cfg_kwargs["D_START"] = start_d
+    if momentum is not None:
+        cfg_kwargs["MOMENTUM"] = momentum
     if cfg_kwargs:
         controller_cfg = Config(**cfg_kwargs)
     else:
@@ -200,6 +212,7 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         start_d=args.start_d,
         eta=args.adaptation_rate,
         target=args.target_success_rate,
+        momentum=args.momentum,
     )
     outcomes = [int(r["outcome"]) for r in rows]
     overall = sum(outcomes) / len(outcomes)
@@ -238,32 +251,38 @@ def cmd_simulate(args: argparse.Namespace) -> int:
 
 def cmd_compare(args: argparse.Namespace) -> int:
     cfg = Config()
-    print("Comparing adaptation rates")
+    print("Comparing controller variants")
     variants = [
-        ("slow", 0.04, cfg.TARGET_SUCCESS_RATE, None),
-        ("default", cfg.ADAPTATION_RATE, cfg.TARGET_SUCCESS_RATE, None),
-        ("fast", 0.12, cfg.TARGET_SUCCESS_RATE, None),
-        ("target=0.80", cfg.ADAPTATION_RATE, 0.80, None),
+        ("slow", 0.04, cfg.TARGET_SUCCESS_RATE, None, None),
+        ("default", cfg.ADAPTATION_RATE, cfg.TARGET_SUCCESS_RATE, None, None),
+        ("fast", 0.12, cfg.TARGET_SUCCESS_RATE, None, None),
+        ("target=0.80", cfg.ADAPTATION_RATE, 0.80, None, None),
+        # lower eta to offset the ~1/(1-momentum) gain of a steady streak
+        ("mom=0.5", cfg.ADAPTATION_RATE / 2, cfg.TARGET_SUCCESS_RATE, None, 0.5),
+        ("mom=0.8", cfg.ADAPTATION_RATE / 5, cfg.TARGET_SUCCESS_RATE, None, 0.8),
     ]
     if (
         args.start_d is not None
         or args.adaptation_rate is not None
         or args.target_success_rate is not None
+        or args.momentum is not None
     ):
         variants.append((
             "custom",
             args.adaptation_rate if args.adaptation_rate is not None else cfg.ADAPTATION_RATE,
             args.target_success_rate if args.target_success_rate is not None else cfg.TARGET_SUCCESS_RATE,
             args.start_d,
+            args.momentum,
         ))
     print(f"{'variant':>12} {'final d':>8} {'overall':>8} {'last 400':>10}")
     summary_rows = []
     all_rows = []
-    for name, eta, target, start_d in variants:
+    for name, eta, target, start_d, momentum in variants:
         rng = random.Random(args.seed)
         controller, variant_rows = _simulate(
             cfg, rng, args.frames, args.noise, args.latency, args.miss,
-            eta=eta, target=target, start_d=start_d, seed=args.seed,
+            eta=eta, target=target, start_d=start_d, momentum=momentum,
+            seed=args.seed,
         )
         outcomes = [int(r["outcome"]) for r in variant_rows]
         overall = sum(outcomes) / len(outcomes)
@@ -281,9 +300,9 @@ def cmd_compare(args: argparse.Namespace) -> int:
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            names = [r[0] for r in rows]
-            overalls = [r[1] for r in rows]
-            tails = [r[2] for r in rows]
+            names = [r[0] for r in summary_rows]
+            overalls = [r[1] for r in summary_rows]
+            tails = [r[2] for r in summary_rows]
             x = range(len(names))
             width = 0.35
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -329,6 +348,7 @@ def cmd_latency_report(args: argparse.Namespace) -> int:
             start_d=args.start_d,
             eta=args.adaptation_rate,
             target=args.target_success_rate,
+            momentum=args.momentum,
         )
         outcomes = [int(r["outcome"]) for r in lat_rows]
         overall = sum(outcomes) / len(outcomes)
@@ -346,7 +366,7 @@ def cmd_latency_report(args: argparse.Namespace) -> int:
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            xs = [r[0] for r in rows]
+            xs = [r[0] for r in summary_rows]
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
             ax1.plot(xs, [r[1] for r in summary_rows], label="overall")
             ax1.plot(xs, [r[2] for r in summary_rows], label="last 400")
@@ -425,6 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim.add_argument("--start-d", type=_closed_unit("--start-d"), default=None, help="initial d (0-1)")
     p_sim.add_argument("--adaptation-rate", type=_positive_float_upto_one("--adaptation-rate"), default=None, help="controller learning rate (0-1]")
     p_sim.add_argument("--target-success-rate", type=_open_unit("--target-success-rate"), default=None, help="target success rate (0-1)")
+    p_sim.add_argument("--momentum", type=_half_open_unit("--momentum"), default=None, help="controller momentum, independent of the learning rate [0, 1)")
     p_sim.add_argument("--csv", type=str, default=None, help="write per-obstacle rows to CSV")
     p_sim.set_defaults(func=cmd_simulate)
 
@@ -438,6 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_comp.add_argument("--start-d", type=_closed_unit("--start-d"), default=None, help="initial d for the custom variant (0-1)")
     p_comp.add_argument("--adaptation-rate", type=_positive_float_upto_one("--adaptation-rate"), default=None, help="learning rate for the custom variant (0-1]")
     p_comp.add_argument("--target-success-rate", type=_open_unit("--target-success-rate"), default=None, help="target success rate for the custom variant (0-1)")
+    p_comp.add_argument("--momentum", type=_half_open_unit("--momentum"), default=None, help="controller momentum, independent of the learning rate [0, 1)")
     p_comp.add_argument("--csv", type=str, default=None, help="write per-obstacle rows to CSV")
     p_comp.set_defaults(func=cmd_compare)
 
@@ -452,6 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lat.add_argument("--start-d", type=_closed_unit("--start-d"), default=None, help="initial d (0-1)")
     p_lat.add_argument("--adaptation-rate", type=_positive_float_upto_one("--adaptation-rate"), default=None, help="controller learning rate (0-1]")
     p_lat.add_argument("--target-success-rate", type=_open_unit("--target-success-rate"), default=None, help="target success rate (0-1)")
+    p_lat.add_argument("--momentum", type=_half_open_unit("--momentum"), default=None, help="controller momentum, independent of the learning rate [0, 1)")
     p_lat.add_argument("--csv", type=str, default=None, help="write per-obstacle rows to CSV")
     p_lat.set_defaults(func=cmd_latency_report)
 
