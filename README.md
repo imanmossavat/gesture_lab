@@ -1,4 +1,4 @@
-# Fontys Gesture Lab
+#  Gesture Lab
 
 A small, educational hand-gesture project for students.
 
