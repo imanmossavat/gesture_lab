@@ -46,15 +46,15 @@ def test_profile_at_difficulty_boundaries():
     assert p0.spawn_interval == pytest.approx(2.5)
 
     p1 = difficulty_profile(1.0)
-    assert p1.speed == pytest.approx(430.0)
-    assert p1.height == pytest.approx(70.0)
-    assert p1.width == pytest.approx(35.0)
+    assert p1.speed == pytest.approx(550.0)
+    assert p1.height == pytest.approx(90.0)
+    assert p1.width == pytest.approx(50.0)
     assert p1.spawn_interval == pytest.approx(1.3)
 
     p5 = difficulty_profile(0.5)
-    assert p5.speed == pytest.approx(345.0)
-    assert p5.height == pytest.approx(50.0)
-    assert p5.width == pytest.approx(27.5)
+    assert p5.speed == pytest.approx(405.0)
+    assert p5.height == pytest.approx(60.0)
+    assert p5.width == pytest.approx(35.0)
     assert p5.spawn_interval == pytest.approx(1.9)
 
 
@@ -215,12 +215,12 @@ def test_min_gap_respected_at_limit():
 def test_min_gap_ignores_off_screen_previous_obstacle():
     cfg = Config()
     prev = Obstacle(x=-200.0, w=30.0, h=50.0)
-    assert spawn_allowed(prev, cfg.SPAWN_X, 430.0, cfg) is True
+    assert spawn_allowed(prev, cfg.SPAWN_X, cfg.SPEED_MAX, cfg) is True
 
 
 def test_min_gap_with_frame_time_spike():
     cfg = Config()
-    speed = 430.0
+    speed = cfg.SPEED_MAX
     # Simulate a large dt that would shrink the gap dangerously.
     prev = Obstacle(x=cfg.SPAWN_X - 50.0, w=30.0, h=50.0)
     assert spawn_allowed(prev, cfg.SPAWN_X, speed, cfg) is False
@@ -343,10 +343,10 @@ def test_feasibility_at_extremes_with_height_jitter():
     assert timing_window(h, w, speed, cfg) > 0.0
     assert clears_obstacle(h, w, speed, 0.0, cfg) is True
 
-    # d = 1, worst-case height with +10% jitter
-    h = 70.0 * 1.1
-    w = 35.0
-    speed = 430.0
+    # d = 1, worst-case height with +10% jitter (use Config ceiling values)
+    h = cfg.HEIGHT_MAX * 1.1
+    w = cfg.WIDTH_MAX
+    speed = cfg.SPEED_MAX
     assert timing_window(h, w, speed, cfg) > 0.0
     assert clears_obstacle(h, w, speed, 0.0, cfg) is True
 
@@ -446,7 +446,7 @@ def test_feasibility_schedule_slack_values():
     cfg = Config()
     air = air_time(cfg)
     jitter_min = cfg.SPAWN_INTERVAL_JITTER[0]
-    expected = [1.656, 1.355, 1.054, 0.753, 0.452]
+    expected = [1.656, 1.351, 1.047, 0.744, 0.442]
     for d, exp in zip([0.0, 0.25, 0.5, 0.75, 1.0], expected):
         profile = difficulty_profile(d, cfg)
         gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width

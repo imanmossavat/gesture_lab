@@ -34,13 +34,16 @@ class Config:
     GRAVITY: float = 1800.0          # px/s^2 (downward positive)
     JUMP_VELOCITY: float = -690.0     # px/s (upward negative)
 
-    # Difficulty profile -- theoretical mapping from d to game parameters.
+    # Difficulty profile -- theoretical mapping from d in [0, 1] to game parameters.
+    # These six fields are the knobs that control how hard the game gets.
+    # If players keep pinning d at 1.0, raise the *_MAX values (and keep
+    # feasibility by checking timing_window() / spawn_allowed()).
     SPEED_MIN: float = 260.0          # px/s
-    SPEED_MAX: float = 430.0          # px/s (260 + 170)
+    SPEED_MAX: float = 550.0          # px/s - hardest obstacle speed at d=1
     HEIGHT_MIN: float = 30.0          # px
-    HEIGHT_MAX: float = 70.0          # px (30 + 40)
+    HEIGHT_MAX: float = 90.0          # px - tallest obstacle at d=1
     WIDTH_MIN: float = 20.0           # px
-    WIDTH_MAX: float = 35.0           # px (20 + 15)
+    WIDTH_MAX: float = 50.0           # px - widest obstacle at d=1
     SPAWN_INTERVAL_BASE_AT_D0: float = 2.5   # s
     SPAWN_INTERVAL_BASE_AT_D1: float = 1.3   # s (2.5 - 1.2)
 
