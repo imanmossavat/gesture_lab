@@ -26,5 +26,5 @@ python dev_bench.py report
 
 ## Gotchas
 
-- `mp_compat.py` silently degrades to a no-op hand detector on MediaPipe wheels that lack legacy `solutions`; real tracking needs a legacy-solutions build or a Tasks API port.
+- `mp_compat.py` prefers MediaPipe legacy `solutions`; when those are missing it falls back to the Tasks API using a downloaded `hand_landmarker.task` model. For offline use, pre-download the model to `~/.cache/fontys_gesture_lab/hand_landmarker.task`.
 - `game.py` and a few game-loop tests need pygame; pure tests never do.

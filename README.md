@@ -62,7 +62,7 @@ python game.py
   ```
 - On some Macs you may see a harmless SDL warning when OpenCV and Pygame are imported together. The test suite includes a smoke test to make sure this does not crash the program.
 - The normal game needs a display, but a headless smoke test is supported via `SDL_VIDEODRIVER=dummy` (see below).
-- Some MediaPipe wheels (e.g. Python 3.13 on Apple Silicon) ship only the Tasks API. `mp_compat.py` lets the game run in smoke mode; for real hand tracking on those wheels, install a legacy-solutions MediaPipe build.
+- Some MediaPipe wheels (e.g. Python 3.13 on Apple Silicon) ship only the Tasks API. `mp_compat.py` automatically uses the Tasks API `HandLandmarker` in that case and downloads the required `hand_landmarker.task` model on first use.
 
 ## Game controls
 
@@ -199,7 +199,7 @@ pytest -q
 
 - `game.py` — gesture-controlled runner with adaptive difficulty.
 - `adaptive.py` — pure-Python adaptive difficulty logic.
-- `mp_compat.py` — MediaPipe legacy-solutions compatibility shim.
+- `mp_compat.py` — MediaPipe compatibility shim (legacy solutions or Tasks API).
 - `dev_bench.py` — headless tuning bench.
 - `analyze.py` — reads latency / outcome CSVs and prints reports and plots.
 - `gesture_lib.py` — landmark conversion, normalisation, and rule-based classifier.

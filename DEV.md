@@ -8,7 +8,7 @@ to tune it.
 | File | Responsibility |
 |---|---|
 | `adaptive.py` | Pure-Python difficulty model, physics helpers, controller, obstacle resolution, latency tracker. |
-| `mp_compat.py` | Compatibility shim for MediaPipe legacy `solutions`. Falls back to no-op stubs on wheels that only ship the Tasks API. |
+| `mp_compat.py` | Compatibility shim: prefers MediaPipe legacy `solutions`, falls back to the Tasks API `HandLandmarker` on wheels that only ship Tasks. |
 | `game.py` | UI, camera, event loop. Imports all adaptive logic from `adaptive.py` and uses `mp_compat`. |
 | `dev_bench.py` | Headless bench for tuning: feasibility, sweep, simulate, compare, latency-report. |
 | `tests/test_adaptive.py` | Unit tests for the adaptive system. |
@@ -159,8 +159,7 @@ existing game.  Expect to adjust the theoretical values after play-tests.
 ## MediaPipe note
 
 Recent MediaPipe wheels (especially Python 3.13 / Apple Silicon) ship the Tasks
-API without the legacy `mediapipe.python.solutions` module.  `mp_compat.py`
-gracefully degrades to a no-op hand detector so the game can still be imported
-and smoke-tested.  For real hand tracking on those wheels, install a MediaPipe
-build that includes legacy solutions, or port the game to the Tasks API with a
-`hand_landmarker.task` model.
+API without the legacy `mediapipe.python.solutions` module.  `mp_compat.py` now
+automatically falls back to the Tasks API `HandLandmarker`.  On first use it
+downloads `hand_landmarker.task` to `~/.cache/fontys_gesture_lab/`.  For offline
+use, place that file manually in the cache directory.
