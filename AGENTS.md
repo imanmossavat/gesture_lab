@@ -27,4 +27,4 @@ python dev_bench.py report
 ## Gotchas
 
 - `mp_compat.py` prefers MediaPipe legacy `solutions`; when those are missing it falls back to the Tasks API using a downloaded `hand_landmarker.task` model. For offline use, pre-download the model to `~/.cache/fontys_gesture_lab/hand_landmarker.task`.
-- `game.py` and a few game-loop tests need pygame; pure tests never do.
+- `game.py` and a few game-loop tests need pygame; pure tests never do. (`test_game_state_uses_config_geometry` imports `GameState` from `game.py`; moving `GameState` into `adaptive.py` is a larger refactor.)
