@@ -26,15 +26,11 @@ We wanted a hand-controlled Dino-style game to get students interested in AI, us
 | Game design | `adaptive.py` | Physics, difficulty profile, and obstacle rules. |
 | Player modelling and control | `AdaptiveController`, `analyze.py`, `summarize.py` | Adapt d from 0/1 outcomes and report on behaviour. |
 
-The perception layer hands over only a jump event, and the controller sees only one binary outcome per obstacle, so players can be simulated without a camera.
-
 ## Learning path
 
 1. Run the notebook to see how landmarks become features.
 2. Play `game.py` and watch `d` adapt.
-3. Run `python dev_bench.py report` to inspect the design numbers.
-4. Change `Config` values and rerun `dev_bench.py feasibility`.
-5. Analyze your own logs with `analyze.py`.
+3. Analyze your own logs with `analyze.py`.
 
 ## Controls
 
@@ -57,7 +53,7 @@ Close your hand to re-arm the jump. Preset changes clear obstacles and start a n
 | normal | 0.94 | 2 | 0.60 |
 | hard | 1.00 | 3 | 0.70 |
 
-Presets set the starting d, threshold and stability; d then adapts.
+Presets only set the starting difficulty (d, threshold, stability). The controller then adapts to your actual success rate, so the choice of preset matters mainly for the first few obstacles.
 
 ## Game over and `--max-crashes`
 
@@ -65,17 +61,31 @@ Crashes are counted since the game started or the preset changed. After `--max-c
 
 ## Data + bench commands
 
+Gather a real session:
+
+```bash
+python game.py --log-outcomes data/alice.csv --log-latency data/alice_latency.csv --player alice --max-crashes 0
+```
+
+Use `--max-crashes 0` for a long run so the controller has time to adapt. Analyze with:
+
+```bash
+python analyze.py data/alice.csv
+python summarize.py data/alice.csv
+```
+
+Run headless smoke or simulation:
+
 ```bash
 SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120 --log-outcomes run.csv
 python analyze.py run.csv
-python summarize.py run.csv
 
 python dev_bench.py feasibility
 python dev_bench.py report
 python dev_bench.py simulate --frames 2000 --csv sim.csv
 ```
 
-Bench CSVs include a metadata header with the full `Config` so reports stay reproducible.
+See all options with `python game.py --help`.
 
 ## Tests
 
@@ -101,5 +111,3 @@ pytest -q
 - **Camera unavailable:** close other apps using the webcam and check OS permissions; try `--camera 1`.
 - **No hand detected:** improve lighting, show the full hand, move closer.
 - **Slow laptop:** lower camera resolution or choose the Easy preset.
-- **Tests fail on import:** activate the virtual environment and install `requirements.txt`.
-- **Headless smoke crashes:** set `SDL_VIDEODRIVER=dummy`.
