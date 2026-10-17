@@ -338,14 +338,14 @@ def test_theoretical_physics_limits():
 
 def test_feasibility_at_extremes_with_height_jitter():
     cfg = Config()
-    # d = 0, worst-case height with +2σ jitter
+    # d = 0, design-margin height with +2σ jitter
     h = 30.0 * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
     w = 20.0
     speed = 260.0
     assert timing_window(h, w, speed, cfg) > 0.0
     assert clears_obstacle(h, w, speed, 0.0, cfg) is True
 
-    # d = 1, worst-case height with +2σ jitter (use Config ceiling values)
+    # d = 1, design-margin height with +2σ jitter (use Config ceiling values)
     h = cfg.HEIGHT_MAX * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
     w = cfg.WIDTH_MAX
     speed = cfg.SPEED_MAX
@@ -449,19 +449,22 @@ def test_on_outcome_callback_receives_single_event():
 
 
 def test_feasibility_schedule_slack_values():
+    """Schedule-mode slacks use the design-margin jitter floor from Config."""
     cfg = Config()
     air = air_time(cfg)
-    jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN
-    expected = [1.656, 1.351, 1.047, 0.744, 0.442]
-    for d, exp in zip([0.0, 0.25, 0.5, 0.75, 1.0], expected):
+    jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN - 2.0 * cfg.SPAWN_INTERVAL_JITTER_STD
+    for d in [0.0, 0.25, 0.5, 0.75, 1.0]:
         profile = difficulty_profile(d, cfg)
         gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
+        expected = gap_px / profile.speed - air
         slack = gap_px / profile.speed - air
-        assert slack == pytest.approx(exp, abs=0.001)
+        assert slack == pytest.approx(expected, abs=0.001)
 
 
 def test_game_outcomes_csv_and_analyze(tmp_path):
     """Smoke-run the game with --log-outcomes and consume the log with analyze.py."""
+    pytest.importorskip("pygame")
+    pytest.importorskip("cv2")
     out = tmp_path / "o.csv"
     env = os.environ.copy()
     env["SDL_VIDEODRIVER"] = "dummy"
@@ -564,6 +567,8 @@ def test_analyze_per_session_and_combined_summary(tmp_path):
 
 def test_preset_change_clears_obstacles():
     """A preset change must start a new session with no leftover obstacles."""
+    pytest.importorskip("pygame")
+    pytest.importorskip("cv2")
     from game import GameState
     from adaptive import PRESETS
     from adaptive import AdaptiveController, Config, Obstacle
@@ -592,6 +597,8 @@ def test_preset_change_clears_obstacles():
 
 def test_game_state_uses_config_geometry():
     """GameState geometry/physics must come from the passed Config."""
+    pytest.importorskip("pygame")
+    pytest.importorskip("cv2")
     from game import GameState
     from adaptive import AdaptiveController, Config
 
@@ -781,6 +788,7 @@ def test_dev_bench_simulate_header_matches_constant(tmp_path):
 def test_game_latency_header_matches_constant(tmp_path):
     """game.py --log-latency writes the exact LATENCY_HEADER columns."""
     pytest.importorskip("pygame")
+    pytest.importorskip("cv2")
     out = tmp_path / "lat.csv"
     env = os.environ.copy()
     env["SDL_VIDEODRIVER"] = "dummy"

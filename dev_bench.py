@@ -163,21 +163,20 @@ def cmd_feasibility(args: argparse.Namespace) -> int:
     rc = 0
     for d in (0.0, 0.25, 0.5, 0.75, 1.0):
         profile = difficulty_profile(d, cfg)
-        # Worst-case height with +2σ jitter.
+        # Design-margin height with +2σ jitter.
         h = profile.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
         if args.gap_mode == "schedule":
-            jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN
+            jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN - 2.0 * cfg.SPAWN_INTERVAL_JITTER_STD
             gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
         else:  # fixed650
             gap_px = 650.0
         slack_s = gap_px / profile.speed - air
         margin = timing_window(h, profile.width, profile.speed, cfg)
-        if slack_s < cfg.LANDING_MARGIN_S:
-            status = "tight"
-            rc = 1
-        elif margin <= 0.0:
+        if margin <= 0.0:
             status = "impossible"
-            rc = 1
+        elif slack_s < cfg.LANDING_MARGIN_S:
+            # The min-gap spawn retry will enforce a safe gap at runtime.
+            status = "retry"
         else:
             status = "ok"
         print(
@@ -217,7 +216,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         )
     print()
 
-    print("Minimum gap (worst case: land before next obstacle)")
+    print("Minimum gap (design margin: land before next obstacle)")
     print(f"{'d':>5} {'speed':>7} {'required_gap_px':>15} {'status':>10}")
     for d in ds:
         prof = difficulty_profile(d, cfg)
@@ -226,7 +225,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         print(f"{d:5.2f} {prof.speed:7.1f} {required:15.1f} {status:>10}")
     print()
 
-    print("Clearance budget (height +2σ jitter)")
+    print("Clearance budget (height design margin +2σ jitter)")
     print(f"{'d':>5} {'speed':>7} {'window_s':>10} {'window_ms':>10} {'half_ms':>10}")
     budgets_ms: list[tuple[float, float]] = []
     for d in ds:

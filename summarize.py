@@ -16,14 +16,14 @@ Handles both log types (detected from the header):
   latency  : frame_read_to_jump_ms, first_open_to_jump_ms, inference_ms,
              loop_ms, accepted         (written by --log-latency)
 
-For outcome logs it also fits the timing-noise model from the math doc:
+For outcome logs it also fits a timing-noise model:
     P(clear) = 2*Phi(B/sigma) - 1 = erf(B / (sigma*sqrt(2)))
 where B is the half timing window of each obstacle, computed from the logged
 speed/height/width with the game's own physics. sigma (ms) is estimated by
 maximum likelihood with a 95% profile-likelihood interval.
 
-Assumptions (see the math doc): timing error is normal and unbiased, and timing
-is the only way to fail. Missed gestures make sigma look larger than it is.
+Assumptions: timing error is normal and unbiased, and timing is the only way to
+fail. Missed gestures make sigma look larger than it is.
 """
 import argparse
 import csv
