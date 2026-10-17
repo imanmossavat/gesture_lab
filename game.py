@@ -100,6 +100,7 @@ class GameState:
         self.set_preset(self.preset_id)
 
     def set_preset(self, pid):
+        self.controller.reset()
         self.preset_id = pid
         settings = self.presets[pid]
         self.controller.d = settings["d"]
@@ -114,12 +115,8 @@ class GameState:
     def reset_game(self):
         self.player_y = self.ground_y - self.player_h
         self.velocity_y = 0.0
-        self.obstacles = []
-        self.spawn_timer = 0.8
         self.jump_latched = False
         self.stable_count = 0
-        self.play_time = 0.0
-        self.controller.reset()
         self.set_preset(self.preset_id)
 
 
@@ -398,6 +395,14 @@ def main():
 
     over_printed = False
 
+    def clear_session_counters():
+        nonlocal valid_gestures, accepted_jumps, rejected_jumps, over_printed
+        d_history.clear()
+        valid_gestures = 0
+        accepted_jumps = 0
+        rejected_jumps = 0
+        over_printed = False
+
     def draw_text(text, x, y, color=(235, 240, 245), use_small=False):
         surf = (small if use_small else font).render(text, True, color)
         screen.blit(surf, (x, y))
@@ -457,21 +462,20 @@ def main():
                     new_phase = next_phase(state.phase, "space")
                     if state.phase == Phase.OVER and new_phase == Phase.PLAYING:
                         state.reset_game()
-                        d_history.clear()
-                        valid_gestures = 0
-                        accepted_jumps = 0
-                        rejected_jumps = 0
-                        over_printed = False
+                        clear_session_counters()
                     state.phase = new_phase
                 elif event.key == pygame.K_1:
                     state.set_preset(1)
                     state.phase = next_phase(state.phase, "preset")
+                    clear_session_counters()
                 elif event.key == pygame.K_2:
                     state.set_preset(2)
                     state.phase = next_phase(state.phase, "preset")
+                    clear_session_counters()
                 elif event.key == pygame.K_3:
                     state.set_preset(3)
                     state.phase = next_phase(state.phase, "preset")
+                    clear_session_counters()
                 elif event.key == pygame.K_d:
                     state.debug_overlay = not state.debug_overlay
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):

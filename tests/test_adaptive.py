@@ -449,16 +449,39 @@ def test_on_outcome_callback_receives_single_event():
 
 
 def test_feasibility_schedule_slack_values():
-    """Schedule-mode slacks use the design-margin jitter floor from Config."""
+    """Schedule-mode slacks use the design-margin jitter floor and match pinned values."""
     cfg = Config()
-    air = air_time(cfg)
-    jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN - 2.0 * cfg.SPAWN_INTERVAL_JITTER_STD
-    for d in [0.0, 0.25, 0.5, 0.75, 1.0]:
+    jitter_floor = cfg.SPAWN_INTERVAL_JITTER_MEAN - 2.0 * cfg.SPAWN_INTERVAL_JITTER_STD
+    expected = {
+        0.00: 1.3064,
+        0.25: 1.0426,
+        0.50: 0.7809,
+        0.75: 0.5203,
+        1.00: 0.2604,
+    }
+    for d, expected_slack in expected.items():
         profile = difficulty_profile(d, cfg)
-        gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
-        expected = gap_px / profile.speed - air
-        slack = gap_px / profile.speed - air
-        assert slack == pytest.approx(expected, abs=0.001)
+        gap_px = profile.speed * profile.spawn_interval * jitter_floor - profile.width
+        slack = gap_px / profile.speed - air_time(cfg)
+        assert slack == pytest.approx(expected_slack, abs=0.001)
+
+
+def test_set_preset_resets_controller_failures():
+    """set_preset() resets the controller counters before applying the new preset."""
+    pytest.importorskip("pygame")
+    pytest.importorskip("cv2")
+    from game import GameState
+
+    controller = AdaptiveController(Config())
+    controller.update(0)
+    controller.update(0)
+    controller.update(0)
+    assert controller.failures == 3
+
+    state = GameState(controller, Config(), start_preset=1)
+    state.set_preset(2)
+    assert controller.failures == 0
+    assert state.preset_id == 2
 
 
 def test_game_outcomes_csv_and_analyze(tmp_path):

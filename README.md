@@ -12,24 +12,21 @@ pytest -q
 python game.py
 ```
 
+The window opens on a ready screen; click it and press SPACE.
+
 ## Why this project exists
 
-- Show how a pretrained model (MediaPipe Hands) gives 21 landmark points.
-- Turn those points into a gesture decision with a small rule-based classifier.
-- Drive difficulty with physics and a target success rate instead of hand-coded levels.
-- Make students think about latency, lighting, camera differences, and real-world robustness.
+We wanted a hand-controlled Dino-style game to get students interested in AI, using a pretrained hand model. The model worked: an open hand reliably produced a "jump" signal. But the game was unplayable for some people and boring for others. Fixing that turned out to be a data problem: physics, human timing, and a feedback loop. Most of this repo is about that part. It is a teaching example that a good model is not a good product.
 
 ## How it fits together
 
-| File | What it does |
-|---|---|
-| `game.py` | Play the gesture-controlled runner. |
-| `dev_bench.py` | Tune the adaptive logic headlessly. |
-| `analyze.py` / `summarize.py` | Read CSV logs and print statistics or plots. |
-| `gesture_landmarks_lab.ipynb` | Guided notebook on landmarks and classification. |
-| `adaptive.py` | Pure difficulty, physics, controller, and CSV headers. |
-| `gesture_lib.py` | Landmark helpers and rule classifier. |
-| `mp_compat.py` | MediaPipe legacy `solutions` → Tasks API fallback. |
+| Layer | Files | What they do |
+|---|---|---|
+| Perception | `gesture_lib.py`, `mp_compat.py` | Turn camera frames into a single "jump" event. |
+| Game design | `adaptive.py` | Physics, difficulty profile, and obstacle rules. |
+| Player modelling and control | `AdaptiveController`, `analyze.py`, `summarize.py` | Adapt d from 0/1 outcomes and report on behaviour. |
+
+The perception layer hands over only a jump event, and the controller sees only one binary outcome per obstacle, so players can be simulated without a camera.
 
 ## Learning path
 
@@ -60,11 +57,11 @@ Close your hand to re-arm the jump. Preset changes clear obstacles and start a n
 | normal | 0.94 | 2 | 0.60 |
 | hard | 1.00 | 3 | 0.70 |
 
-The controller still adapts within a preset; presets set the starting difficulty.
+Presets set the starting d, threshold and stability; d then adapts.
 
 ## Game over and `--max-crashes`
 
-Crashes are counted per session. After `--max-crashes N` (default 3) the game shows on-screen stats and waits for SPACE to retry. Set `--max-crashes 0` to disable the stop.
+Crashes are counted since the game started or the preset changed. After `--max-crashes N` (default 3) the game shows on-screen stats and waits for SPACE to retry. Set `--max-crashes 0` to disable the stop. Games are short by default, so the controller adapts little within one; raise `--max-crashes` or use `0` for longer sessions.
 
 ## Data + bench commands
 
