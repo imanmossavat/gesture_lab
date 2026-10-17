@@ -17,6 +17,7 @@ import dataclasses
 import datetime
 import math
 import random
+import statistics
 import subprocess
 import sys
 
@@ -226,14 +227,35 @@ def cmd_report(args: argparse.Namespace) -> int:
     print()
 
     print("Clearance budget (height +10% jitter)")
-    print(f"{'d':>5} {'speed':>7} {'half_window_s':>13} {'window_ms':>10}")
+    print(f"{'d':>5} {'speed':>7} {'window_s':>10} {'window_ms':>10} {'half_ms':>10}")
+    budgets_ms: list[tuple[float, float]] = []
     for d in ds:
         prof = difficulty_profile(d, cfg)
         h = prof.height * (1.0 + cfg.HEIGHT_JITTER)
-        half = timing_window(h, prof.width, prof.speed, cfg)
+        window = timing_window(h, prof.width, prof.speed, cfg)
+        half_ms = 0.5 * window * 1000.0
+        budgets_ms.append((d, half_ms))
         print(
-            f"{d:5.2f} {prof.speed:7.1f} {half:13.4f} {half * 1000.0:10.2f}"
+            f"{d:5.2f} {prof.speed:7.1f} {window:10.4f} "
+            f"{window * 1000.0:10.2f} {half_ms:10.2f}"
         )
+    print()
+
+    # Operating range: timing-noise std σ for which an interior equilibrium exists.
+    # Model: reaction error ε ~ N(0, σ²), success iff |ε| < half-window.
+    target = cfg.TARGET_SUCCESS_RATE
+    z = statistics.NormalDist().inv_cdf((1.0 + target) / 2.0)  # P(|Z| < z) = target
+    sigmas = [(d, half / z) for d, half in budgets_ms]
+    print(
+        f"Interior equilibrium (Gaussian reaction error, P(clear) = {target:.2f})"
+    )
+    print(f"{'d':>5} {'half_ms':>10} {'sigma_ms':>10}")
+    for d, sigma in sigmas:
+        half = next(half for dd, half in budgets_ms if dd == d)
+        print(f"{d:5.2f} {half:10.2f} {sigma:10.1f}")
+    sigma_min, sigma_max = min(s for _, s in sigmas), max(s for _, s in sigmas)
+    print(f"  σ range for interior d ∈ [{cfg.D_MIN}, {cfg.D_MAX}]: "
+          f"{sigma_min:.1f}–{sigma_max:.1f} ms")
     print()
 
     print("Controller update per outcome")

@@ -34,7 +34,9 @@ Use `air_time()`, `jump_peak()`, `apex_time()`, and `time_above(h)` to inspect
 it.  `timing_window(h, w, speed)` subtracts the horizontal overlap duration
 from `time_above(h)`.  A perfect-timed jump clears the obstacle when
 `timing_window > 0`; the usable timing budget is half of that margin
-(`clears_obstacle`).
+(`clears_obstacle`).  `python dev_bench.py report` prints the full window,
+the usable half-budget in ms, and the Gaussian-model σ range for which an
+interior equilibrium exists.
 
 ## Controller
 
