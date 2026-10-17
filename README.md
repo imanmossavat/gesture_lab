@@ -69,9 +69,9 @@ python game.py
 | Input | Action |
 |---|---|
 | **Open hand** | Jump (once per stable gesture) |
-| **1** | Easy preset (d = 0.25) |
-| **2** | Normal preset (d = 0.50) |
-| **3** | Hard preset (d = 0.75) |
+| **1** | Easy preset (d = 0.80) |
+| **2** | Normal preset (d = 0.94) |
+| **3** | Hard preset (d = 1.00) |
 | **+ / -** | Raise / lower confidence threshold |
 | **R** | Restart |
 | **D** | Toggle debug overlay |
@@ -95,9 +95,9 @@ theoretically jumpable.
 
 | Preset | d | Stability frames | Threshold |
 |---|---|---|---|
-| Easy | 0.25 | 1 | 0.50 |
-| Normal | 0.50 | 2 | 0.60 |
-| Hard | 0.75 | 3 | 0.70 |
+| Easy | 0.80 | 1 | 0.50 |
+| Normal | 0.94 | 2 | 0.60 |
+| Hard | 1.00 | 3 | 0.70 |
 
 ## Collecting data
 

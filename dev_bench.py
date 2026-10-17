@@ -206,7 +206,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     print(f"  jump peak      = {peak:.1f} px")
     print()
 
-    ds = [cfg.D_MIN] + sorted(p["d"] for p in PRESETS.values()) + [cfg.D_MAX]
+    ds = sorted({cfg.D_MIN, cfg.D_MAX} | {p["d"] for p in PRESETS.values()})
     print("Difficulty profile")
     print(f"{'d':>5} {'speed':>7} {'height':>7} {'width':>7} {'interval':>9}")
     for d in ds:

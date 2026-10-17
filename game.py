@@ -2,7 +2,7 @@
 
 Controls:
     Open hand  : jump (stable gesture)
-    1 / 2 / 3  : easy / normal / hard difficulty presets (sets d to 0.25/0.5/0.75)
+    1 / 2 / 3  : easy / normal / hard difficulty presets (sets d to 0.80/0.94/1.00)
     + / -      : raise / lower confidence threshold
     R          : restart
     D          : toggle debug overlay

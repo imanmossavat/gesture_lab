@@ -78,10 +78,13 @@ class Config:
 # Presets only affect the starting d, classifier threshold, stability
 # requirement, and UI colour.  All runtime parameters come from
 # difficulty_profile(d).
+# d values are centred on the observed ceiling (0.94) so the default
+# Normal preset starts near the top of the adaptive range, with Easy
+# slightly below and Hard clamped at the absolute ceiling.
 PRESETS = {
-    1: {"d": 0.25, "threshold": 0.50, "stability": 1, "color": (120, 220, 120)},
-    2: {"d": 0.50, "threshold": 0.60, "stability": 2, "color": (255, 200, 90)},
-    3: {"d": 0.75, "threshold": 0.70, "stability": 3, "color": (255, 110, 110)},
+    1: {"d": 0.80, "threshold": 0.50, "stability": 1, "color": (120, 220, 120)},
+    2: {"d": 0.94, "threshold": 0.60, "stability": 2, "color": (255, 200, 90)},
+    3: {"d": 1.00, "threshold": 0.70, "stability": 3, "color": (255, 110, 110)},
 }
 
 
