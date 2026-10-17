@@ -11,6 +11,7 @@ import random
 import statistics
 from collections import deque
 from dataclasses import dataclass
+from enum import Enum
 from typing import Callable, NamedTuple, Optional
 
 
@@ -78,6 +79,31 @@ class Config:
 
     # Latency diagnostics
     LATENCY_WINDOW: int = 200
+
+
+class Phase(Enum):
+    READY = "ready"
+    PLAYING = "playing"
+    PAUSED = "paused"
+    OVER = "over"
+
+
+def next_phase(phase: Phase, event: str) -> Phase:
+    """Pure state transition for the game loop."""
+    if event == "space":
+        if phase == Phase.READY:
+            return Phase.PLAYING
+        if phase == Phase.PLAYING:
+            return Phase.PAUSED
+        if phase == Phase.PAUSED:
+            return Phase.PLAYING
+        if phase == Phase.OVER:
+            return Phase.PLAYING
+    if event == "game_over" and phase == Phase.PLAYING:
+        return Phase.OVER
+    if event == "preset":
+        return Phase.READY
+    return phase
 
 
 # Presets only affect the starting d, classifier threshold, stability

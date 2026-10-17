@@ -19,12 +19,14 @@ from adaptive import (
     Obstacle,
     OUTCOME_HEADER,
     PRESETS,
+    Phase,
     SessionTracker,
     air_time,
     attempt_jump,
     clears_obstacle,
     difficulty_profile,
     jump_peak,
+    next_phase,
     next_spawn_timer,
     resolve_obstacles,
     spawn_allowed,
@@ -794,3 +796,28 @@ def test_game_latency_header_matches_constant(tmp_path):
     lines = out.read_text().splitlines()
     header_line = next(line for line in lines if not line.startswith("#"))
     assert header_line == ",".join(LATENCY_HEADER)
+
+# ---------------------------------------------------------------------------
+# Phase flow
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "phase,event,expected",
+    [
+        (Phase.READY, "space", Phase.PLAYING),
+        (Phase.READY, "game_over", Phase.READY),
+        (Phase.READY, "preset", Phase.READY),
+        (Phase.PLAYING, "space", Phase.PAUSED),
+        (Phase.PLAYING, "game_over", Phase.OVER),
+        (Phase.PLAYING, "preset", Phase.READY),
+        (Phase.PAUSED, "space", Phase.PLAYING),
+        (Phase.PAUSED, "game_over", Phase.PAUSED),
+        (Phase.PAUSED, "preset", Phase.READY),
+        (Phase.OVER, "space", Phase.PLAYING),
+        (Phase.OVER, "game_over", Phase.OVER),
+        (Phase.OVER, "preset", Phase.READY),
+    ],
+)
+def test_next_phase_table(phase, event, expected):
+    assert next_phase(phase, event) is expected
+
