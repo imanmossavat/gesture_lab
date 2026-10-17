@@ -47,12 +47,17 @@ class Config:
     SPAWN_INTERVAL_BASE_AT_D0: float = 2.5   # s
     SPAWN_INTERVAL_BASE_AT_D1: float = 1.3   # s (2.5 - 1.2)
 
-    # Spawn interval jitter -- multiplicative, only ever lengthens the interval.
-    SPAWN_INTERVAL_JITTER: tuple[float, float] = (1.0, 1.3)
+    # Spawn interval jitter -- multiplicative, sampled from N(mean, std).
+    # The mean of 1.0 keeps the average interval at the base value; a small
+    # std adds normal variation while the positive floor in sampling prevents
+    # non-positive intervals.
+    SPAWN_INTERVAL_JITTER_MEAN: float = 1.0
+    SPAWN_INTERVAL_JITTER_STD: float = 0.07
 
-    # Height jitter -- theoretical range that adds variation without breaking feasibility.
-    # Width is *not* jittered; only height gets ±10% variation.
-    HEIGHT_JITTER: float = 0.10
+    # Height jitter -- multiplicative, sampled from N(mean, std).
+    # Only height is jittered; width is fixed so the min-gap guarantee holds.
+    HEIGHT_JITTER_MEAN: float = 1.0
+    HEIGHT_JITTER_STD: float = 0.07
 
     # Controller -- theoretical choices, not calibrated.
     TARGET_SUCCESS_RATE: float = 0.75
@@ -284,12 +289,36 @@ def spawn_allowed(
     return gap_px >= required - 1e-9
 
 
+def _sample_jitter_multiplier(
+    rng: random.Random, mean: float, std: float, floor: float = 0.1
+) -> float:
+    """Sample a positive multiplier from a normal distribution.
+
+    Values below ``floor`` are rejected and resampled, keeping the multiplier
+    strictly positive.  With the default small std this rejection is extremely
+    rare.
+    """
+    while True:
+        v = rng.gauss(mean, std)
+        if v >= floor:
+            return v
+
+
 def randomize_height(
     profile: DifficultyProfile, rng: random.Random, config: Optional[Config] = None
 ) -> float:
+    """Return a jittered obstacle height in pixels.
+
+    The base ``profile.height`` is multiplied by a sample from
+    ``N(Config.HEIGHT_JITTER_MEAN, Config.HEIGHT_JITTER_STD)``.  The sample is
+    rejected if it would be non-positive, so the returned height is always
+    strictly positive.
+    """
     cfg = config or Config()
-    j = cfg.HEIGHT_JITTER
-    return profile.height * rng.uniform(1.0 - j, 1.0 + j)
+    multiplier = _sample_jitter_multiplier(
+        rng, cfg.HEIGHT_JITTER_MEAN, cfg.HEIGHT_JITTER_STD
+    )
+    return profile.height * multiplier
 
 
 def try_spawn(
@@ -324,14 +353,16 @@ def next_spawn_timer(
 ) -> float:
     """Return a jittered spawn timer in seconds.
 
-    The interval is multiplied by a uniform factor in
-    ``Config.SPAWN_INTERVAL_JITTER``.  The default range (1.0, 1.3) only ever
-    lengthens the interval, so the shortest possible interval is the base
-    ``profile.spawn_interval``.
+    The interval is multiplied by a sample from
+    ``N(Config.SPAWN_INTERVAL_JITTER_MEAN, Config.SPAWN_INTERVAL_JITTER_STD)``.
+    The positive floor in sampling keeps the timer strictly positive; the
+    caller's min-gap check prevents impossibly short spawns.
     """
     cfg = config or Config()
-    jitter_min, jitter_max = cfg.SPAWN_INTERVAL_JITTER
-    return profile.spawn_interval * rng.uniform(jitter_min, jitter_max)
+    multiplier = _sample_jitter_multiplier(
+        rng, cfg.SPAWN_INTERVAL_JITTER_MEAN, cfg.SPAWN_INTERVAL_JITTER_STD
+    )
+    return profile.spawn_interval * multiplier
 
 
 # ---------------------------------------------------------------------------

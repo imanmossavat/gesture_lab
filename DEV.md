@@ -20,12 +20,13 @@ to tune it.
 The mapping is implemented in `adaptive.difficulty_profile` and configured by
 `adaptive.Config`.  Run `python dev_bench.py report` to see the current values.
 
-Height is jittered ±10% at spawn time.  Width is **not** jittered because the
-timing window depends on the horizontal overlap `(w + PLAYER_WIDTH) / speed`,
-and width jitter would break the min-gap guarantee.
+Height is jittered at spawn time: the base height is multiplied by a sample
+from `N(1.0, 0.07)`.  Width is **not** jittered because the timing window
+depends on the horizontal overlap `(w + PLAYER_WIDTH) / speed`, and width
+jitter would break the min-gap guarantee.
 
-The actual time between spawns is `spawn_interval * uniform(1.0, 1.3)`, which
-only ever lengthens the base interval.
+The actual time between spawns is `spawn_interval * N(1.0, 0.07)`.  Values
+that would be non-positive are rejected and resampled.
 
 ## Physics helpers
 

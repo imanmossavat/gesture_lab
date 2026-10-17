@@ -163,10 +163,10 @@ def cmd_feasibility(args: argparse.Namespace) -> int:
     rc = 0
     for d in (0.0, 0.25, 0.5, 0.75, 1.0):
         profile = difficulty_profile(d, cfg)
-        # Worst-case height with +10% jitter.
-        h = profile.height * 1.1
+        # Worst-case height with +2σ jitter.
+        h = profile.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
         if args.gap_mode == "schedule":
-            jitter_min = cfg.SPAWN_INTERVAL_JITTER[0]
+            jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN
             gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
         else:  # fixed650
             gap_px = 650.0
@@ -226,12 +226,12 @@ def cmd_report(args: argparse.Namespace) -> int:
         print(f"{d:5.2f} {prof.speed:7.1f} {required:15.1f} {status:>10}")
     print()
 
-    print("Clearance budget (height +10% jitter)")
+    print("Clearance budget (height +2σ jitter)")
     print(f"{'d':>5} {'speed':>7} {'window_s':>10} {'window_ms':>10} {'half_ms':>10}")
     budgets_ms: list[tuple[float, float]] = []
     for d in ds:
         prof = difficulty_profile(d, cfg)
-        h = prof.height * (1.0 + cfg.HEIGHT_JITTER)
+        h = prof.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
         window = timing_window(h, prof.width, prof.speed, cfg)
         half_ms = 0.5 * window * 1000.0
         budgets_ms.append((d, half_ms))
@@ -276,7 +276,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     d = 0.0
     while d <= 1.0001:
         profile = difficulty_profile(d, cfg)
-        h = profile.height * 1.1
+        h = profile.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
         margin = timing_window(h, profile.width, profile.speed, cfg)
         print(
             f"{d:4.2f} {profile.speed:6.1f} {h:6.1f} {profile.width:6.1f} "

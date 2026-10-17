@@ -136,7 +136,7 @@ def design_margins():
     out = []
     for d in (0.0, 0.5, 1.0):
         p = difficulty_profile(d, cfg)
-        h = p.height * (1 + cfg.HEIGHT_JITTER)       # tallest jittered obstacle
+        h = p.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)  # +2σ jittered obstacle
         window = timing_window(h, p.width, p.speed, cfg) * 1000.0
         out.append((d, window, 0.5 * window))         # clears_obstacle allows +-half
     return out

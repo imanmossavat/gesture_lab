@@ -336,15 +336,15 @@ def test_theoretical_physics_limits():
 
 def test_feasibility_at_extremes_with_height_jitter():
     cfg = Config()
-    # d = 0, worst-case height with +10% jitter
-    h = 30.0 * 1.1
+    # d = 0, worst-case height with +2σ jitter
+    h = 30.0 * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
     w = 20.0
     speed = 260.0
     assert timing_window(h, w, speed, cfg) > 0.0
     assert clears_obstacle(h, w, speed, 0.0, cfg) is True
 
-    # d = 1, worst-case height with +10% jitter (use Config ceiling values)
-    h = cfg.HEIGHT_MAX * 1.1
+    # d = 1, worst-case height with +2σ jitter (use Config ceiling values)
+    h = cfg.HEIGHT_MAX * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
     w = cfg.WIDTH_MAX
     speed = cfg.SPEED_MAX
     assert timing_window(h, w, speed, cfg) > 0.0
@@ -362,7 +362,7 @@ def _run_simulation(seed, n, timing_noise_ms, latency_jitter_ms, miss_prob, skil
     outcomes = []
     for _ in range(n):
         profile = difficulty_profile(c.d, cfg)
-        h = profile.height * rng.uniform(0.9, 1.1)
+        h = profile.height * max(0.1, rng.gauss(1.0, cfg.HEIGHT_JITTER_STD))
         w = profile.width
         speed = profile.speed
         if rng.random() < miss_prob:
@@ -420,7 +420,11 @@ def test_next_spawn_timer_within_jitter_range():
     profile = difficulty_profile(0.5, cfg)
     for _ in range(20):
         t = next_spawn_timer(profile, rng, cfg)
-        assert profile.spawn_interval <= t <= profile.spawn_interval * 1.3
+        mean = cfg.SPAWN_INTERVAL_JITTER_MEAN
+        std = cfg.SPAWN_INTERVAL_JITTER_STD
+        lo = profile.spawn_interval * (mean - 3.0 * std)
+        hi = profile.spawn_interval * (mean + 3.0 * std)
+        assert lo <= t <= hi
 
 
 def test_on_outcome_callback_receives_single_event():
@@ -445,7 +449,7 @@ def test_on_outcome_callback_receives_single_event():
 def test_feasibility_schedule_slack_values():
     cfg = Config()
     air = air_time(cfg)
-    jitter_min = cfg.SPAWN_INTERVAL_JITTER[0]
+    jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN
     expected = [1.656, 1.351, 1.047, 0.744, 0.442]
     for d, exp in zip([0.0, 0.25, 0.5, 0.75, 1.0], expected):
         profile = difficulty_profile(d, cfg)

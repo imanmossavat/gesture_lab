@@ -13,6 +13,7 @@ import csv
 import dataclasses
 import datetime
 import random
+import statistics
 import subprocess
 import sys
 import time
@@ -234,6 +235,12 @@ def parse_args():
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
+        "--max-crashes",
+        type=int,
+        default=3,
+        help="Stop and prompt for replay after this many crashes (0 disables).",
+    )
+    parser.add_argument(
         "--log-latency",
         type=str,
         default=None,
@@ -362,6 +369,24 @@ def main():
     player_w, player_h = state.player_w, state.player_h
     gravity = state.gravity
     jump_velocity = state.jump_velocity
+    max_crashes = 0 if args.smoke_frames is not None else args.max_crashes
+    d_history: list[float] = []
+
+    def print_game_over_stats():
+        print("\n" + "=" * 40)
+        print("GAME OVER")
+        print(f"  Crashed: {controller.failures}")
+        print(f"  Cleared: {controller.successes}")
+        print(f"  Final d: {controller.d:.3f}")
+        if d_history:
+            d_min = min(d_history)
+            d_mean = statistics.mean(d_history)
+            d_max = max(d_history)
+            print(f"  d min / mean / max: {d_min:.3f} / {d_mean:.3f} / {d_max:.3f}")
+        else:
+            print("  d stats: (no obstacle outcomes recorded)")
+        print("=" * 40)
+
     running = True
 
     def draw_text(text, x, y, color=(235, 240, 245), use_small=False):
@@ -369,237 +394,279 @@ def main():
         screen.blit(surf, (x, y))
 
     def on_outcome(ob, outcome):
-        if outcomes_writer is None:
-            return
-        t_s = time.perf_counter() - state.game_start
-        outcomes_writer.writerow([
-            f"{t_s:.3f}",
-            args.player,
-            state.tracker.current,
-            state.preset_id,
-            f"{ob.d_spawn:.4f}",
-            f"{controller.d:.4f}",
-            f"{ob.speed_spawn:.1f}",
-            f"{ob.h:.1f}",
-            f"{ob.w:.1f}",
-            outcome,
-        ])
-        outcomes_log.flush()
+        if outcomes_writer is not None:
+            t_s = time.perf_counter() - state.game_start
+            outcomes_writer.writerow([
+                f"{t_s:.3f}",
+                args.player,
+                state.tracker.current,
+                state.preset_id,
+                f"{ob.d_spawn:.4f}",
+                f"{controller.d:.4f}",
+                f"{ob.speed_spawn:.1f}",
+                f"{ob.h:.1f}",
+                f"{ob.w:.1f}",
+                outcome,
+            ])
+            outcomes_log.flush()
+        d_history.append(controller.d)
 
-    while running:
-        loop_start = time.perf_counter()
-        dt = min(clock.tick(FPS_TARGET) / 1000.0, 0.05)
+    play_again = True
+    user_quit = False
+    while play_again:
+        play_again = False
+        running = True
+        game_over = False
+        while running:
+            loop_start = time.perf_counter()
+            dt = min(clock.tick(FPS_TARGET) / 1000.0, 0.05)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
                     running = False
-                elif event.key == pygame.K_r:
-                    state.reset_game()
-                elif event.key == pygame.K_1:
-                    state.set_preset(1)
-                elif event.key == pygame.K_2:
-                    state.set_preset(2)
-                elif event.key == pygame.K_3:
-                    state.set_preset(3)
-                elif event.key == pygame.K_d:
-                    state.debug_overlay = not state.debug_overlay
-                elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                    state.threshold = min(0.95, state.threshold + 0.05)
-                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                    state.threshold = max(0.10, state.threshold - 0.05)
+                    user_quit = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                        running = False
+                        user_quit = True
+                    elif event.key == pygame.K_r:
+                        state.reset_game()
+                        d_history.clear()
+                    elif event.key == pygame.K_1:
+                        state.set_preset(1)
+                    elif event.key == pygame.K_2:
+                        state.set_preset(2)
+                    elif event.key == pygame.K_3:
+                        state.set_preset(3)
+                    elif event.key == pygame.K_d:
+                        state.debug_overlay = not state.debug_overlay
+                    elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                        state.threshold = min(0.95, state.threshold + 0.05)
+                    elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                        state.threshold = max(0.10, state.threshold - 0.05)
 
-        ok, frame = cap.read()
-        frame_read_time = time.perf_counter()
-        infer_ms = 0.0
-        if ok:
-            frame = cv2.flip(frame, 1)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            infer_start = time.perf_counter()
-            result = hands.process(rgb)
-            infer_ms = (time.perf_counter() - infer_start) * 1000.0
+            ok, frame = cap.read()
+            frame_read_time = time.perf_counter()
+            infer_ms = 0.0
+            if ok:
+                frame = cv2.flip(frame, 1)
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                infer_start = time.perf_counter()
+                result = hands.process(rgb)
+                infer_ms = (time.perf_counter() - infer_start) * 1000.0
 
-            if result.multi_hand_landmarks:
-                landmarks = result.multi_hand_landmarks[0]
-                detected, score = classifier.classify(landmarks)
-                mp_draw.draw_landmarks(
-                    frame,
-                    landmarks,
-                    mp_hands.HAND_CONNECTIONS,
-                    mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
-                    mp_draw.DrawingSpec(color=(0, 200, 255), thickness=2),
+                if result.multi_hand_landmarks:
+                    landmarks = result.multi_hand_landmarks[0]
+                    detected, score = classifier.classify(landmarks)
+                    mp_draw.draw_landmarks(
+                        frame,
+                        landmarks,
+                        mp_hands.HAND_CONNECTIONS,
+                        mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                        mp_draw.DrawingSpec(color=(0, 200, 255), thickness=2),
+                    )
+                else:
+                    detected = "none"
+                    score = 0.0
+
+                camera_surface = to_pygame_surface(
+                    cv2.resize(frame, (CAM_W, CAM_H), interpolation=cv2.INTER_LINEAR)
                 )
-            else:
-                detected = "none"
-                score = 0.0
 
-            camera_surface = to_pygame_surface(
-                cv2.resize(frame, (CAM_W, CAM_H), interpolation=cv2.INTER_LINEAR)
+            open_event = False
+            if detected == "open" and score >= state.threshold:
+                if state.stable_count == 0:
+                    first_open_time = time.perf_counter()
+                state.stable_count += 1
+                if state.stable_count >= state.stability and not state.jump_latched:
+                    open_event = True
+            else:
+                state.stable_count = 0
+                state.jump_latched = False
+
+            if open_event:
+                jump_time = time.perf_counter()
+                state.velocity_y, accepted = attempt_jump(
+                    state.player_y, state.velocity_y, ground_y, player_h, jump_velocity
+                )
+                state.jump_latched = True
+                valid_gestures += 1
+                if accepted:
+                    accepted_jumps += 1
+                else:
+                    rejected_jumps += 1
+
+                frame_to_jump.add((jump_time - frame_read_time) * 1000.0)
+                open_to_jump.add((jump_time - first_open_time) * 1000.0)
+                infer_ms_tracker.add(infer_ms)
+
+
+            # Player physics (always runs; no game over)
+            state.velocity_y += gravity * dt
+            state.player_y += state.velocity_y * dt
+            if state.player_y > ground_y - player_h:
+                state.player_y = ground_y - player_h
+                state.velocity_y = 0.0
+
+            # Speed policy: one global speed from the current d.  The controller
+            # changes d by at most ETA = 0.08 per outcome, so speed changes by at
+            # most 170 * 0.08 = 13.6 px/s per step (in practice <= ~10 px/s near
+            # the target).  This keeps the pixel gap between obstacles stable.
+            profile = difficulty_profile(controller.d, config)
+            speed = profile.speed
+
+            # Spawn logic with min-gap retry.
+            state.spawn_timer -= dt
+            if state.spawn_timer <= 0.0:
+                prev_ob = state.obstacles[-1] if state.obstacles else None
+                new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
+                if new_ob is not None:
+                    state.obstacles.append(new_ob)
+                    state.spawn_timer = next_spawn_timer(profile, rng, config)
+                else:
+                    # Retry on the next frame.
+                    state.spawn_timer = min(dt, 0.01)
+
+            # Resolve obstacles and update d exactly once per obstacle.
+            state.obstacles = resolve_obstacles(
+                state.obstacles,
+                player_x,
+                state.player_y,
+                player_w,
+                player_h,
+                ground_y,
+                speed,
+                dt,
+                controller,
+                config,
+                on_outcome=on_outcome,
             )
 
-        open_event = False
-        if detected == "open" and score >= state.threshold:
-            if state.stable_count == 0:
-                first_open_time = time.perf_counter()
-            state.stable_count += 1
-            if state.stable_count >= state.stability and not state.jump_latched:
-                open_event = True
-        else:
-            state.stable_count = 0
-            state.jump_latched = False
+            if max_crashes > 0 and controller.failures >= max_crashes:
+                game_over = True
+                running = False
 
-        if open_event:
-            jump_time = time.perf_counter()
-            state.velocity_y, accepted = attempt_jump(
-                state.player_y, state.velocity_y, ground_y, player_h, jump_velocity
+            loop_ms = (time.perf_counter() - loop_start) * 1000.0
+            loop_ms_tracker.add(loop_ms)
+
+            # Finish logging the previous frame's jump now that loop_ms is known.
+            if open_event and latency_writer is not None:
+                latency_writer.writerow(
+                    [
+                        f"{frame_to_jump.values[-1]:.3f}",
+                        f"{open_to_jump.values[-1]:.3f}",
+                        f"{infer_ms:.3f}",
+                        f"{loop_ms:.3f}",
+                        int(accepted),
+                    ]
+                )
+
+            if args.smoke_frames is not None:
+                args.smoke_frames -= 1
+                if args.smoke_frames <= 0:
+                    running = False
+
+            fps = clock.get_fps()
+
+            screen.fill((18, 23, 33))
+            pygame.draw.rect(screen, (28, 36, 49), (0, 0, WIDTH, 385))
+
+            if camera_surface is not None:
+                screen.blit(camera_surface, (24, 24))
+            else:
+                pygame.draw.rect(screen, (35, 42, 55), (24, 24, CAM_W, CAM_H))
+                draw_text("Camera preview unavailable", 40, 45)
+
+            pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
+
+            draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
+            pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
+            draw_text(f"Gesture: {detected} ({score:.2f})", 525, 58)
+            draw_text(f"Threshold: {state.threshold:.2f}  (+ / -)", 525, 91)
+            draw_text(f"Speed: {speed:.0f}", 525, 124)
+            draw_text(f"FPS: {fps:.1f}  |  Loop: {loop_ms:.1f} ms", 525, 157)
+            draw_text(
+                "Controls: 1 easy  2 normal  3 hard  D debug  +/- threshold  R restart  Q quit",
+                525,
+                190,
+                use_small=True,
             )
-            state.jump_latched = True
-            valid_gestures += 1
-            if accepted:
-                accepted_jumps += 1
-            else:
-                rejected_jumps += 1
 
-            frame_to_jump.add((jump_time - frame_read_time) * 1000.0)
-            open_to_jump.add((jump_time - first_open_time) * 1000.0)
-            infer_ms_tracker.add(infer_ms)
+            pygame.draw.rect(screen, (13, 17, 24), (0, 390, WIDTH, HEIGHT - 390))
+            pygame.draw.line(screen, (110, 125, 145), (0, ground_y), (WIDTH, ground_y), 3)
+            pygame.draw.rect(
+                screen,
+                (88, 197, 255),
+                (int(player_x), int(state.player_y), player_w, player_h),
+                border_radius=7,
+            )
+            for ob in state.obstacles:
+                color = (120, 120, 120) if ob.failed else (255, 111, 105)
+                rect = pygame.Rect(
+                    int(ob.x), int(ground_y - ob.h), int(ob.w), int(ob.h)
+                )
+                pygame.draw.rect(screen, color, rect, border_radius=5)
 
+            draw_text(f"Cleared: {controller.successes}  Crashed: {controller.failures}", 24, 410)
+            draw_text("Open hand = jump. Close hand to re-arm.", 24, 445, use_small=True)
 
-        # Player physics (always runs; no game over)
-        state.velocity_y += gravity * dt
-        state.player_y += state.velocity_y * dt
-        if state.player_y > ground_y - player_h:
-            state.player_y = ground_y - player_h
-            state.velocity_y = 0.0
-
-        # Speed policy: one global speed from the current d.  The controller
-        # changes d by at most ETA = 0.08 per outcome, so speed changes by at
-        # most 170 * 0.08 = 13.6 px/s per step (in practice <= ~10 px/s near
-        # the target).  This keeps the pixel gap between obstacles stable.
-        profile = difficulty_profile(controller.d, config)
-        speed = profile.speed
-
-        # Spawn logic with min-gap retry.
-        state.spawn_timer -= dt
-        if state.spawn_timer <= 0.0:
-            prev_ob = state.obstacles[-1] if state.obstacles else None
-            new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
-            if new_ob is not None:
-                state.obstacles.append(new_ob)
-                state.spawn_timer = next_spawn_timer(profile, rng, config)
-            else:
-                # Retry on the next frame.
-                state.spawn_timer = min(dt, 0.01)
-
-        # Resolve obstacles and update d exactly once per obstacle.
-        state.obstacles = resolve_obstacles(
-            state.obstacles,
-            player_x,
-            state.player_y,
-            player_w,
-            player_h,
-            ground_y,
-            speed,
-            dt,
-            controller,
-            config,
-            on_outcome=on_outcome,
-        )
-
-        loop_ms = (time.perf_counter() - loop_start) * 1000.0
-        loop_ms_tracker.add(loop_ms)
-
-        # Finish logging the previous frame's jump now that loop_ms is known.
-        if open_event and latency_writer is not None:
-            latency_writer.writerow(
-                [
-                    f"{frame_to_jump.values[-1]:.3f}",
-                    f"{open_to_jump.values[-1]:.3f}",
-                    f"{infer_ms:.3f}",
-                    f"{loop_ms:.3f}",
-                    int(accepted),
+            if state.debug_overlay:
+                recent = controller.recent_success_rate()
+                lines = [
+                    "--- debug ---",
+                    f"d = {controller.d:.3f}",
+                    f"speed={speed:.1f} h={profile.height:.1f} w={profile.width:.1f} int={profile.spawn_interval:.2f}",
+                    f"recent success = {recent:.2f} (last {len(controller.recent)})",
+                    f"totals: {controller.outcomes}  ok={controller.successes}  bad={controller.failures}",
+                    f"gestures: valid={valid_gestures} acc={accepted_jumps} rej={rejected_jumps}",
                 ]
-            )
+                if frame_to_jump.count >= 10:
+                    lines.append(
+                        f"latency ms: mean={frame_to_jump.mean():.1f} "
+                        f"med={frame_to_jump.median():.1f} "
+                        f"p90={frame_to_jump.p90():.1f} "
+                        f"std={frame_to_jump.std():.1f}"
+                    )
+                if loop_ms_tracker.count >= 10:
+                    lines.append(
+                        f"loop ms: mean={loop_ms_tracker.mean():.1f} "
+                        f"p90={loop_ms_tracker.p90():.1f}"
+                    )
+                y = 480
+                for line in lines:
+                    draw_text(line, 525, y, use_small=True)
+                    y += 20
+
+            if game_over:
+                overlay = font.render("GAME OVER - see terminal", True, (255, 80, 80))
+                screen.blit(
+                    overlay,
+                    (
+                        WIDTH // 2 - overlay.get_width() // 2,
+                        HEIGHT // 2 - overlay.get_height() // 2,
+                    ),
+                )
+
+            pygame.display.flip()
 
         if args.smoke_frames is not None:
-            args.smoke_frames -= 1
-            if args.smoke_frames <= 0:
-                running = False
-
-        fps = clock.get_fps()
-
-        screen.fill((18, 23, 33))
-        pygame.draw.rect(screen, (28, 36, 49), (0, 0, WIDTH, 385))
-
-        if camera_surface is not None:
-            screen.blit(camera_surface, (24, 24))
-        else:
-            pygame.draw.rect(screen, (35, 42, 55), (24, 24, CAM_W, CAM_H))
-            draw_text("Camera preview unavailable", 40, 45)
-
-        pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
-
-        draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
-        pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
-        draw_text(f"Gesture: {detected} ({score:.2f})", 525, 58)
-        draw_text(f"Threshold: {state.threshold:.2f}  (+ / -)", 525, 91)
-        draw_text(f"Speed: {speed:.0f}", 525, 124)
-        draw_text(f"FPS: {fps:.1f}  |  Loop: {loop_ms:.1f} ms", 525, 157)
-        draw_text(
-            "Controls: 1 easy  2 normal  3 hard  D debug  +/- threshold  R restart  Q quit",
-            525,
-            190,
-            use_small=True,
-        )
-
-        pygame.draw.rect(screen, (13, 17, 24), (0, 390, WIDTH, HEIGHT - 390))
-        pygame.draw.line(screen, (110, 125, 145), (0, ground_y), (WIDTH, ground_y), 3)
-        pygame.draw.rect(
-            screen,
-            (88, 197, 255),
-            (int(player_x), int(state.player_y), player_w, player_h),
-            border_radius=7,
-        )
-        for ob in state.obstacles:
-            color = (120, 120, 120) if ob.failed else (255, 111, 105)
-            rect = pygame.Rect(
-                int(ob.x), int(ground_y - ob.h), int(ob.w), int(ob.h)
-            )
-            pygame.draw.rect(screen, color, rect, border_radius=5)
-
-        draw_text(f"Cleared: {controller.successes}  Crashed: {controller.failures}", 24, 410)
-        draw_text("Open hand = jump. Close hand to re-arm.", 24, 445, use_small=True)
-
-        if state.debug_overlay:
-            recent = controller.recent_success_rate()
-            lines = [
-                "--- debug ---",
-                f"d = {controller.d:.3f}",
-                f"speed={speed:.1f} h={profile.height:.1f} w={profile.width:.1f} int={profile.spawn_interval:.2f}",
-                f"recent success = {recent:.2f} (last {len(controller.recent)})",
-                f"totals: {controller.outcomes}  ok={controller.successes}  bad={controller.failures}",
-                f"gestures: valid={valid_gestures} acc={accepted_jumps} rej={rejected_jumps}",
-            ]
-            if frame_to_jump.count >= 10:
-                lines.append(
-                    f"latency ms: mean={frame_to_jump.mean():.1f} "
-                    f"med={frame_to_jump.median():.1f} "
-                    f"p90={frame_to_jump.p90():.1f} "
-                    f"std={frame_to_jump.std():.1f}"
-                )
-            if loop_ms_tracker.count >= 10:
-                lines.append(
-                    f"loop ms: mean={loop_ms_tracker.mean():.1f} "
-                    f"p90={loop_ms_tracker.p90():.1f}"
-                )
-            y = 480
-            for line in lines:
-                draw_text(line, 525, y, use_small=True)
-                y += 20
-
-        pygame.display.flip()
+            break
+        if user_quit:
+            break
+        if game_over:
+            print_game_over_stats()
+            try:
+                choice = input("Play again? (y/n): ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                choice = "n"
+            if choice in ("y", "yes"):
+                state.reset_game()
+                d_history.clear()
+                valid_gestures = accepted_jumps = rejected_jumps = 0
+                play_again = True
+                user_quit = False
+            else:
+                play_again = False
 
     hands.close()
     cap.release()
