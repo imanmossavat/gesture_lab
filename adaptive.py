@@ -288,6 +288,21 @@ def attempt_jump(
     return velocity_y, False
 
 
+def fixed_steps(accum: float, frame_s: float, step_s: float) -> tuple[int, float]:
+    """Split elapsed real time into whole fixed physics steps.
+
+    The camera sets how often the game loop runs (often about 30 frames per
+    second), but the jump and obstacle windows are only valid for a fixed
+    physics step.  Each loop pass adds its real duration ``frame_s`` to the
+    carried-over ``accum`` and runs as many steps of ``step_s`` as fit.
+    Returns ``(steps_to_run, new_accum)``; the remainder is kept for the next
+    pass, so game time never drifts from real time by more than one step.
+    """
+    total = accum + frame_s
+    n = int(total / step_s + 1e-6)
+    return n, max(0.0, total - n * step_s)
+
+
 # ---------------------------------------------------------------------------
 # Spawn control
 # ---------------------------------------------------------------------------

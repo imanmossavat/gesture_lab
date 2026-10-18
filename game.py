@@ -34,6 +34,7 @@ from adaptive import (
     attempt_jump,
     build_presets,
     difficulty_profile,
+    fixed_steps,
     next_phase,
     next_spawn_timer,
     resolve_obstacles,
@@ -41,6 +42,7 @@ from adaptive import (
 )
 from experiment import (
     ExperimentPlan,
+    FRAME_DT,
     TRIAL_HEADER,
     TrialRecorder,
     make_trials,
@@ -576,9 +578,16 @@ def main():
 
     print("Game window is open (it may be behind other windows). Click it and press SPACE to start.")
 
+    step_accum = 0.0
     running = True
     while running:
         loop_start = time.perf_counter()
+        # NOTE (agents): game FPS is coupled to camera FPS. cap.read() below blocks,
+        # so one loop pass lasts about one camera interval (about 33 ms for a 30 FPS
+        # webcam), not 1/FPS_TARGET. raw_dt is that time. Never use it as the physics
+        # step: gravity makes the jump arc depend on the step size, and the
+        # experiment windows assume 1/60 s. Physics runs in fixed FRAME_DT steps via
+        # fixed_steps() below; camera FPS should only affect jump start time t_j.
         raw_dt = min(clock.tick(FPS_TARGET) / 1000.0, 0.05)
         dt = raw_dt if state.phase == Phase.PLAYING else 0.0
 
@@ -678,74 +687,81 @@ def main():
         speed = 0.0
         profile = difficulty_profile(controller.d, config)
         if state.phase == Phase.PLAYING:
-            state.velocity_y += gravity * dt
-            state.player_y += state.velocity_y * dt
-            if state.player_y > ground_y - player_h:
-                state.player_y = ground_y - player_h
-
             speed = args.experiment_speed if experiment_mode else profile.speed
+            # Physics runs in fixed 1/60 s steps whatever the camera rate is:
+            # the experiment's jump windows are only valid for that step.
+            n_steps, step_accum = fixed_steps(step_accum, raw_dt, FRAME_DT)
+            for _ in range(n_steps):
+                dt = FRAME_DT
+                state.velocity_y += gravity * dt
+                state.player_y += state.velocity_y * dt
+                if state.player_y > ground_y - player_h:
+                    state.player_y = ground_y - player_h
 
-            state.spawn_timer -= dt
-            if state.spawn_timer <= 0.0 and experiment_mode:
-                # Experiment: take the next obstacle from the planned list.
-                trial = plan.take_next()
-                if trial is not None:
-                    new_ob = trial_to_obstacle(trial, config)
-                    # Same bookkeeping as the adaptive spawn: time since the last spawn.
-                    new_ob.gap_s = (
-                        state.play_time - state.last_spawn_t
-                        if state.last_spawn_t is not None else 0.0
-                    )
-                    state.last_spawn_t = state.play_time
-                    state.obstacles.append(new_ob)
-                    recorder.register(
-                        new_ob, target_w=trial.target_w,
-                        next_gap_px=trial.gap_after_px, index=trial.index,
-                    )
-                    state.spawn_timer = trial.interval_after or 1.0
-                else:
-                    state.spawn_timer = 1.0   # list used up: nothing more to spawn
-            elif state.spawn_timer <= 0.0:
-                prev_ob = state.obstacles[-1] if state.obstacles else None
-                new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
-                if new_ob is not None:
-                    new_ob.gap_s = (
-                        state.play_time - state.last_spawn_t
-                        if state.last_spawn_t is not None else 0.0
-                    )
-                    state.last_spawn_t = state.play_time
-                    state.obstacles.append(new_ob)
-                    if recorder is not None:
-                        recorder.register(new_ob)
-                    state.spawn_timer = next_spawn_timer(profile, rng, config)
-                else:
-                    # Retry on the next frame.
-                    state.spawn_timer = min(dt, 0.01)
+                state.spawn_timer -= dt
+                if state.spawn_timer <= 0.0 and experiment_mode:
+                    # Experiment: take the next obstacle from the planned list.
+                    trial = plan.take_next()
+                    if trial is not None:
+                        new_ob = trial_to_obstacle(trial, config)
+                        # Same bookkeeping as the adaptive spawn: time since the last spawn.
+                        new_ob.gap_s = (
+                            state.play_time - state.last_spawn_t
+                            if state.last_spawn_t is not None else 0.0
+                        )
+                        state.last_spawn_t = state.play_time
+                        state.obstacles.append(new_ob)
+                        recorder.register(
+                            new_ob, target_w=trial.target_w,
+                            next_gap_px=trial.gap_after_px, index=trial.index,
+                        )
+                        state.spawn_timer = trial.interval_after or 1.0
+                    else:
+                        state.spawn_timer = 1.0   # list used up: nothing more to spawn
+                elif state.spawn_timer <= 0.0:
+                    prev_ob = state.obstacles[-1] if state.obstacles else None
+                    new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
+                    if new_ob is not None:
+                        new_ob.gap_s = (
+                            state.play_time - state.last_spawn_t
+                            if state.last_spawn_t is not None else 0.0
+                        )
+                        state.last_spawn_t = state.play_time
+                        state.obstacles.append(new_ob)
+                        if recorder is not None:
+                            recorder.register(new_ob)
+                        state.spawn_timer = next_spawn_timer(profile, rng, config)
+                    else:
+                        # Retry on the next frame.
+                        state.spawn_timer = min(dt, 0.01)
 
-            state.obstacles = resolve_obstacles(
-                state.obstacles,
-                player_x,
-                state.player_y,
-                player_w,
-                player_h,
-                ground_y,
-                speed,
-                dt,
-                controller,
-                config,
-                on_outcome=on_outcome,
-            )
+                state.obstacles = resolve_obstacles(
+                    state.obstacles,
+                    player_x,
+                    state.player_y,
+                    player_w,
+                    player_h,
+                    ground_y,
+                    speed,
+                    dt,
+                    controller,
+                    config,
+                    on_outcome=on_outcome,
+                )
 
-            if max_crashes > 0 and controller.failures >= max_crashes:
-                state.phase = next_phase(state.phase, "game_over")
+                if max_crashes > 0 and controller.failures >= max_crashes:
+                    state.phase = next_phase(state.phase, "game_over")
 
-            # Experiment ends once every planned obstacle has been decided.
-            if (experiment_mode and plan.exhausted
-                    and all(ob.done for ob in state.obstacles)):
-                state.phase = next_phase(state.phase, "game_over")
+                # Experiment ends once every planned obstacle has been decided.
+                if (experiment_mode and plan.exhausted
+                        and all(ob.done for ob in state.obstacles)):
+                    state.phase = next_phase(state.phase, "game_over")
 
-            state.play_time += dt
+                state.play_time += dt
+                if state.phase != Phase.PLAYING:
+                    break
         else:
+            step_accum = 0.0
             speed = args.experiment_speed if experiment_mode else profile.speed
 
         loop_ms = (time.perf_counter() - loop_start) * 1000.0

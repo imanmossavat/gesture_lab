@@ -978,3 +978,18 @@ def test_summarize_skips_rest_table_without_gap_column(tmp_path):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert "success by rest time" not in r.stdout
+
+
+def test_fixed_steps_keeps_game_time_equal_to_real_time():
+    """Whatever the camera frame time, physics runs in whole 1/60 s steps and
+    game time never drifts from real time by more than one step."""
+    from adaptive import fixed_steps
+
+    step = 1.0 / 60.0
+    for frame_s in (1 / 30, 1 / 60, 1 / 45, 0.025, 0.05):
+        accum, steps = 0.0, 0
+        for i in range(1, 1201):
+            n, accum = fixed_steps(accum, frame_s, step)
+            steps += n
+            assert abs(steps * step - i * frame_s) <= step + 1e-9
+        assert 0.0 <= accum < step + 1e-9
