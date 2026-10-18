@@ -8,3 +8,4 @@ __pycache__/
 venv/
 *.py[cod]
 *.log
+!data/alice_run1.csv
