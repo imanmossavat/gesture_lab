@@ -55,6 +55,24 @@ class Config:
     SPAWN_INTERVAL_JITTER_MEAN: float = 1.0
     SPAWN_INTERVAL_JITTER_STD: float = 0.07
 
+    # Spawn rhythm.  "jitter" = base interval x small normal jitter (nearly a
+    # metronome).  "wild" = gap drawn uniformly between the shortest feasible
+    # gap and a symmetric upper bound, so the rhythm is unpredictable.  In
+    # "wild" mode the average interval is the profile interval, but never less
+    # than (shortest feasible interval + SPAWN_WILD_ROOM_S): this keeps real
+    # room for variation at high d, where the profile interval is already
+    # close to the physical floor.
+    SPAWN_GAP_MODE: str = "wild"        # "wild" | "jitter" | "probe"
+    SPAWN_WILD_ROOM_S: float = 0.7      # s of average room above the floor
+    # "probe" = measurement mode.  The rhythm is set directly by the REST time:
+    # spawn-to-spawn gap = air time + U(REST_LO, REST_HI).  REST is the time
+    # between landing and the ideal take-off for the next obstacle when the
+    # first jump is perfectly timed, so REST < 0 is impossible without
+    # early/late luck.  The profile interval and the min-gap floor are ignored
+    # (only non-overlap is required), so gaps can be far tighter than normal.
+    SPAWN_REST_LO_S: float = 0.0        # s
+    SPAWN_REST_HI_S: float = 0.7        # s
+
     # Height jitter -- multiplicative, sampled from N(mean, std).
     # Only height is jittered; width is fixed so the min-gap guarantee holds.
     HEIGHT_JITTER_MEAN: float = 1.0
@@ -130,7 +148,7 @@ def build_presets(start_d=None, preset_id=2, base=PRESETS):
 # CSV column order used by game.py --log-outcomes and dev_bench.py.
 OUTCOME_HEADER = [
     "t_s", "player", "session", "mode", "d_spawn", "d_after",
-    "speed", "height", "width", "outcome",
+    "speed", "height", "width", "outcome", "gap_s",
 ]
 
 # CSV column order used by game.py --log-latency.
@@ -156,6 +174,7 @@ class Obstacle:
     failed: bool = False
     d_spawn: float = 0.0
     speed_spawn: float = 0.0
+    gap_s: float = 0.0   # time since the previous obstacle spawned (0 = none)
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -308,6 +327,10 @@ def spawn_allowed(
         return True
     prev_right = prev_obstacle.x + prev_obstacle.w
     gap_px = new_left_x - prev_right
+    if cfg.SPAWN_GAP_MODE == "probe":
+        # Measurement mode: spacing is controlled by the rest-time sampler, so
+        # only forbid overlapping obstacles.
+        return gap_px >= 0.0
     required = max(
         cfg.MIN_GAP_FLOOR_PX,
         speed * (air_time(cfg) + cfg.LANDING_MARGIN_S),
@@ -372,12 +395,45 @@ def try_spawn(
     )
 
 
+def min_spawn_interval(
+    profile: DifficultyProfile, config: Optional[Config] = None
+) -> float:
+    """Shortest spawn-to-spawn time (s) that satisfies the min-gap rule.
+
+    This is ``spawn_allowed`` expressed in seconds: the obstacle must travel
+    the required gap plus the previous obstacle's width.  The previous width is
+    approximated by the current profile width.  The game's own spawn check
+    still has the last word, so an approximation here can never produce an
+    infeasible pair.
+    """
+    cfg = config or Config()
+    required_px = max(
+        cfg.MIN_GAP_FLOOR_PX,
+        profile.speed * (air_time(cfg) + cfg.LANDING_MARGIN_S),
+    )
+    return (required_px + profile.width) / profile.speed
+
+
 def next_spawn_timer(
     profile: DifficultyProfile,
     rng: random.Random,
     config: Optional[Config] = None,
 ) -> float:
-    """Return a jittered spawn timer in seconds.
+    """Return the time (s) until the next obstacle should spawn.
+
+    ``SPAWN_GAP_MODE == "wild"``: uniform on ``[lo, 2*mean - lo]`` where ``lo``
+    is the shortest feasible interval and ``mean`` is the profile interval
+    (raised to ``lo + SPAWN_WILD_ROOM_S`` if it is closer to the floor than
+    that).  The mean is preserved, no gap is below the feasible minimum, and no
+    gap is more than about twice the mean.
+
+    ``SPAWN_GAP_MODE == "probe"``: ``air_time + U(SPAWN_REST_LO_S,
+    SPAWN_REST_HI_S)``, i.e. the rest time is sampled directly and may be far
+    below the normal feasibility floor (measurement only).
+
+    ``SPAWN_GAP_MODE == "jitter"``: the original behaviour, described below.
+
+    Original jitter behaviour:
 
     The interval is multiplied by a sample from
     ``N(Config.SPAWN_INTERVAL_JITTER_MEAN, Config.SPAWN_INTERVAL_JITTER_STD)``.
@@ -385,6 +441,17 @@ def next_spawn_timer(
     caller's min-gap check prevents impossibly short spawns.
     """
     cfg = config or Config()
+    if cfg.SPAWN_GAP_MODE == "wild":
+        lo = min_spawn_interval(profile, cfg)
+        mean = max(profile.spawn_interval, lo + cfg.SPAWN_WILD_ROOM_S)
+        return rng.uniform(lo, 2.0 * mean - lo)
+    if cfg.SPAWN_GAP_MODE == "probe":
+        return air_time(cfg) + rng.uniform(cfg.SPAWN_REST_LO_S, cfg.SPAWN_REST_HI_S)
+    if cfg.SPAWN_GAP_MODE != "jitter":
+        raise ValueError(
+            "SPAWN_GAP_MODE must be 'wild', 'jitter' or 'probe', "
+            f"got {cfg.SPAWN_GAP_MODE!r}"
+        )
     multiplier = _sample_jitter_multiplier(
         rng, cfg.SPAWN_INTERVAL_JITTER_MEAN, cfg.SPAWN_INTERVAL_JITTER_STD
     )

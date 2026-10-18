@@ -110,6 +110,7 @@ class GameState:
         self.tracker.bump()
         self.obstacles = []
         self.spawn_timer = 0.8
+        self.last_spawn_t = None
         self.play_time = 0.0
 
     def reset_game(self):
@@ -225,6 +226,31 @@ def parse_args():
         help="Target success rate for the controller (default 0.75)",
     )
     parser.add_argument(
+        "--spawn-mode",
+        choices=("wild", "jitter", "probe"),
+        default=Config.SPAWN_GAP_MODE,
+        help="Obstacle rhythm: 'wild' = unpredictable gaps (default), "
+             "'jitter' = near-constant gaps, 'probe' = measurement mode with "
+             "very tight gaps set by --rest-range",
+    )
+    parser.add_argument(
+        "--rest-range",
+        type=float,
+        nargs=2,
+        metavar=("LO", "HI"),
+        default=None,
+        help="Probe mode: rest time in seconds between landing and the next "
+             "ideal take-off, sampled uniformly in [LO, HI] "
+             "(default 0.0 0.7; the normal game never goes below ~0.44)",
+    )
+    parser.add_argument(
+        "--spawn-room",
+        type=_float_in_closed_range(0.0, 5.0, "--spawn-room"),
+        default=Config.SPAWN_WILD_ROOM_S,
+        help="Wild mode: average seconds of room above the shortest feasible "
+             "gap (default 0.7; bigger = wilder and fewer obstacles at high d)",
+    )
+    parser.add_argument(
         "--dummy-camera",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -259,7 +285,12 @@ def parse_args():
         default=None,
         help="Optional CSV path for obstacle-outcome logs",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.rest_range is not None:
+        lo, hi = args.rest_range
+        if not (-0.3 <= lo <= hi <= 3.0):
+            parser.error("--rest-range needs -0.3 <= LO <= HI <= 3.0")
+    return args
 
 
 def to_pygame_surface(bgr_frame):
@@ -330,6 +361,12 @@ def main():
         MOMENTUM=args.momentum,
         TARGET_SUCCESS_RATE=args.target_success_rate,
         D_START=args.start_d if args.start_d is not None else Config.D_START,
+        SPAWN_GAP_MODE=args.spawn_mode,
+        SPAWN_WILD_ROOM_S=args.spawn_room,
+        SPAWN_REST_LO_S=(args.rest_range[0] if args.rest_range
+                         else Config.SPAWN_REST_LO_S),
+        SPAWN_REST_HI_S=(args.rest_range[1] if args.rest_range
+                         else Config.SPAWN_REST_HI_S),
     )
     rng = random.Random()
     controller = AdaptiveController(config, rng=rng)
@@ -437,6 +474,7 @@ def main():
                 f"{ob.h:.1f}",
                 f"{ob.w:.1f}",
                 outcome,
+                f"{ob.gap_s:.3f}",
             ])
             outcomes_log.flush()
         d_history.append(controller.d)
@@ -554,6 +592,11 @@ def main():
                 prev_ob = state.obstacles[-1] if state.obstacles else None
                 new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
                 if new_ob is not None:
+                    new_ob.gap_s = (
+                        state.play_time - state.last_spawn_t
+                        if state.last_spawn_t is not None else 0.0
+                    )
+                    state.last_spawn_t = state.play_time
                     state.obstacles.append(new_ob)
                     state.spawn_timer = next_spawn_timer(profile, rng, config)
                 else:

@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from adaptive import Config, timing_window  # noqa: E402
+from adaptive import Config, air_time, timing_window  # noqa: E402
 
 CFG = Config()
 BAND = 0.15          # "settled" = d stays within +-BAND of its late-session mean
@@ -113,6 +113,7 @@ def _meta_line(meta):
         return ""
     parts = []
     for k in ("ADAPTATION_RATE", "MOMENTUM", "TARGET_SUCCESS_RATE", "D_START", "effective_start_d",
+              "SPAWN_GAP_MODE", "SPAWN_REST_LO_S", "SPAWN_REST_HI_S",
               "initial_preset", "player", "timestamp", "git_hash"):
         if k in meta:
             parts.append(f"{k}={meta[k]}")
@@ -155,6 +156,74 @@ def fit_sigma(budgets, outs, lo_ms=5, hi_ms=800):
 
 
 # ---------------------------------------------------------- outcome report
+REST_EDGES = [-1.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 99.0]
+
+
+def _rest_label(lo, hi):
+    if lo <= -1.0:
+        return f"< {hi:.1f}"
+    if hi >= 99.0:
+        return f">= {lo:.1f}"
+    return f"{lo:.1f}-{hi:.1f}"
+
+
+def rest_table(kept, outs, budgets, sigma_ms):
+    """Success of each obstacle against its REST time (needs the gap_s column).
+
+    REST = gap_s - air_time: the time between landing from the previous jump and
+    the ideal take-off for this obstacle, if the previous jump was perfectly
+    timed.  Only obstacles whose previous obstacle was cleared are used (a crash
+    leaves the player in an unknown state).  'model' is the success predicted by
+    timing noise alone, so a bin far below it shows recovery/decision time, not
+    timing precision, is the limit.
+    """
+    air = air_time(CFG)
+    pts = []  # (rest, outcome, budget)
+    for i in range(1, len(kept)):
+        try:
+            gap = float(kept[i].get("gap_s") or 0.0)
+        except ValueError:
+            continue
+        if gap <= 0.0 or outs[i - 1] != 1:
+            continue
+        pts.append((gap - air, outs[i], budgets[i]))
+    if len(pts) < 20:
+        print("success by rest time: too few pairs with a logged gap_s (need >= 20)")
+        return
+    base = [(b, o) for r, o, b in pts if r >= 0.6 and b > 0]
+    if len(base) >= 30:
+        bs = fit_sigma([b for b, _ in base], [o for _, o in base])[0]
+        note = f"model sigma {bs} ms, fitted on {len(base)} pairs with rest >= 0.6 s"
+    else:
+        bs = sigma_ms
+        note = f"model sigma {bs} ms, fitted on all obstacles (few long-rest pairs)"
+    print("success by rest time (previous obstacle cleared; rest = gap_s - air time;"
+          " rest < 0 needs perfect timing):")
+    print(f"  {note}")
+    print(f"  {'rest (s)':>9s} {'n':>4s} {'obs':>6s} {'95% CI':>14s} {'model':>6s}")
+    below = []
+    for lo_, hi_ in zip(REST_EDGES[:-1], REST_EDGES[1:]):
+        sel = [(o, b) for r, o, b in pts if lo_ <= r < hi_]
+        if not sel:
+            continue
+        kk = sum(o for o, _ in sel)
+        l, h = wilson(kk, len(sel))
+        pred = st.mean(p_clear(b, bs / 1000.0) for _, b in sel)
+        flag = ""
+        if len(sel) < MIN_BIN_N:
+            flag = " (few)"
+        elif wilson(kk, len(sel), z=2.8)[1] < pred:  # stricter: ~8 bins are compared
+            flag = "  << below model"
+            below.append(_rest_label(lo_, hi_))
+        print(f"  {_rest_label(lo_, hi_):>9s} {len(sel):4d} {kk / len(sel):6.2f} "
+              f"[{l:.2f},{h:.2f}] {pred:6.2f}{flag}")
+    if below:
+        print("  bins clearly below the timing-only model (99.5% bound): " + ", ".join(below)
+              + "  -> recovery/decision time limits these gaps")
+    else:
+        print("  no bin clearly below the timing-only model in this range")
+
+
 def outcome_group(label, rows, a, meta=None):
     """Summarise one player/session group. Returns a one-line table row or None."""
     i0 = a.trim_start
@@ -239,6 +308,8 @@ def outcome_group(label, rows, a, meta=None):
                 few = "" if len(idx) >= MIN_BIN_N else " (few)"
                 print(f"  {a_:3.1f}-{min(b_, 1.0):<4.1f} {len(idx):4d} {kk / len(idx):6.2f} "
                       f"[{l:.2f},{h:.2f}] {pred:6.2f}{few}")
+        if "gap_s" in kept[0]:
+            rest_table(kept, outs, budgets, sg)
     return (label, n, k / n, lo, hi, d_tail_mean, sigma_line)
 
 

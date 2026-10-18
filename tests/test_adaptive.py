@@ -417,7 +417,7 @@ def test_done_obstacle_keeps_moving_after_outcome():
 
 
 def test_next_spawn_timer_within_jitter_range():
-    cfg = Config()
+    cfg = Config(SPAWN_GAP_MODE="jitter")
     rng = random.Random(123)
     profile = difficulty_profile(0.5, cfg)
     for _ in range(20):
@@ -427,6 +427,43 @@ def test_next_spawn_timer_within_jitter_range():
         lo = profile.spawn_interval * (mean - 3.0 * std)
         hi = profile.spawn_interval * (mean + 3.0 * std)
         assert lo <= t <= hi
+
+
+def test_wild_spawn_timer_is_feasible_bounded_and_keeps_mean():
+    """Wild mode: never below the feasible minimum, bounded above, mean preserved."""
+    from adaptive import min_spawn_interval
+    cfg = Config(SPAWN_GAP_MODE="wild")
+    rng = random.Random(7)
+    for d in (0.0, 0.5, 0.8, 1.0):
+        profile = difficulty_profile(d, cfg)
+        lo = min_spawn_interval(profile, cfg)
+        mean = max(profile.spawn_interval, lo + cfg.SPAWN_WILD_ROOM_S)
+        xs = [next_spawn_timer(profile, rng, cfg) for _ in range(4000)]
+        assert min(xs) >= lo - 1e-9
+        assert max(xs) <= 2.0 * mean - lo + 1e-9
+        assert sum(xs) / len(xs) == pytest.approx(mean, rel=0.03)
+        # unpredictable: spread far larger than a player's ~0.1 s timing noise
+        sd = (sum((x - mean) ** 2 for x in xs) / len(xs)) ** 0.5
+        assert sd > 0.25
+
+
+def test_wild_spawn_pairs_pass_the_game_gap_rule():
+    """Gaps from the wild sampler satisfy spawn_allowed at the moment the timer fires."""
+    cfg = Config(SPAWN_GAP_MODE="wild")
+    rng = random.Random(11)
+    for d in (0.0, 0.5, 1.0):
+        profile = difficulty_profile(d, cfg)
+        for _ in range(500):
+            t = next_spawn_timer(profile, rng, cfg)
+            prev = Obstacle(x=cfg.SPAWN_X - profile.speed * t, w=profile.width,
+                            h=profile.height, done=False, failed=False)
+            assert spawn_allowed(prev, cfg.SPAWN_X, profile.speed, cfg)
+
+
+def test_spawn_mode_rejects_unknown_value():
+    cfg = Config(SPAWN_GAP_MODE="nope")
+    with pytest.raises(ValueError):
+        next_spawn_timer(difficulty_profile(0.5, cfg), random.Random(1), cfg)
 
 
 def test_on_outcome_callback_receives_single_event():
@@ -852,3 +889,92 @@ def test_game_latency_header_matches_constant(tmp_path):
 def test_next_phase_table(phase, event, expected):
     assert next_phase(phase, event) is expected
 
+
+
+# ---------------------------------------------------------------------------
+# Probe mode (tight gaps for measuring recovery time) and gap_s logging
+# ---------------------------------------------------------------------------
+
+def test_probe_spawn_timer_is_air_time_plus_rest_range():
+    cfg = Config(SPAWN_GAP_MODE="probe", SPAWN_REST_LO_S=0.05, SPAWN_REST_HI_S=0.45)
+    rng = random.Random(3)
+    profile = difficulty_profile(0.5, cfg)
+    xs = [next_spawn_timer(profile, rng, cfg) for _ in range(3000)]
+    air = air_time(cfg)
+    assert min(xs) >= air + 0.05 - 1e-9
+    assert max(xs) <= air + 0.45 + 1e-9
+    assert sum(xs) / len(xs) == pytest.approx(air + 0.25, abs=0.02)
+
+
+def test_probe_mode_allows_gaps_below_the_normal_floor_but_not_overlap():
+    prof = difficulty_profile(0.5, Config())
+    prev = Obstacle(x=1190.0 - 150.0 - prof.width, w=prof.width, h=50.0)  # 150 px gap
+    assert not spawn_allowed(prev, 1190.0, prof.speed, Config(SPAWN_GAP_MODE="wild"))
+    assert spawn_allowed(prev, 1190.0, prof.speed, Config(SPAWN_GAP_MODE="probe"))
+    overlapping = Obstacle(x=1190.0 - 10.0, w=prof.width, h=50.0)
+    assert not spawn_allowed(overlapping, 1190.0, prof.speed, Config(SPAWN_GAP_MODE="probe"))
+
+
+def test_outcome_header_ends_with_gap_s_and_obstacle_defaults():
+    assert OUTCOME_HEADER[-1] == "gap_s"
+    assert Obstacle(x=0.0, w=1.0, h=1.0).gap_s == 0.0
+
+
+def _write_rest_csv(path, rng, penalty_below_s, n=300):
+    cfg = Config()
+    air = air_time(cfg)
+    p = difficulty_profile(0.5, cfg)
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=OUTCOME_HEADER)
+        w.writeheader()
+        for i in range(n):
+            rest = rng.uniform(0.0, 0.9)
+            h = p.height
+            budget = 0.5 * timing_window(h, p.width, p.speed, cfg)
+            sigma = 0.12 * (1.0 + (2.5 * max(0.0, (penalty_below_s - rest) / penalty_below_s)
+                                   if penalty_below_s else 0.0))
+            outcome = 1 if abs(rng.gauss(0.0, sigma)) <= budget else 0
+            w.writerow({
+                "t_s": f"{i * 1.5:.3f}", "player": "sim", "session": 1, "mode": 2,
+                "d_spawn": "0.5000", "d_after": "0.5000", "speed": f"{p.speed:.1f}",
+                "height": f"{h:.1f}", "width": f"{p.width:.1f}", "outcome": outcome,
+                "gap_s": f"{air + rest:.3f}",
+            })
+
+
+def test_summarize_rest_table_flags_a_recovery_penalty(tmp_path):
+    rng = random.Random(21)
+    with_penalty = tmp_path / "penalty.csv"
+    no_penalty = tmp_path / "plain.csv"
+    _write_rest_csv(with_penalty, rng, penalty_below_s=0.3)
+    _write_rest_csv(no_penalty, rng, penalty_below_s=0.0)
+    root = Path(__file__).resolve().parent.parent
+
+    r1 = subprocess.run(["python", "summarize.py", str(with_penalty)], cwd=str(root),
+                        capture_output=True, text=True)
+    assert r1.returncode == 0, r1.stderr
+    assert "success by rest time" in r1.stdout
+    assert "<< below model" in r1.stdout
+
+    r2 = subprocess.run(["python", "summarize.py", str(no_penalty)], cwd=str(root),
+                        capture_output=True, text=True)
+    assert r2.returncode == 0, r2.stderr
+    assert "success by rest time" in r2.stdout
+    assert "<< below model" not in r2.stdout
+
+
+def test_summarize_skips_rest_table_without_gap_column(tmp_path):
+    p = tmp_path / "old.csv"
+    _write_rest_csv(p, random.Random(5), penalty_below_s=0.0, n=60)
+    rows = list(csv.DictReader(open(p)))
+    with open(p, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=[c for c in OUTCOME_HEADER if c != "gap_s"])
+        w.writeheader()
+        for r in rows:
+            r.pop("gap_s")
+            w.writerow(r)
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run(["python", "summarize.py", str(p)], cwd=str(root),
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "success by rest time" not in r.stdout
