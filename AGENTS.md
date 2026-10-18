@@ -8,9 +8,15 @@ Slow-changing reference for the gesture lab. Regenerable numbers live in code, t
 - `mp_compat.py`: MediaPipe compatibility shim.
 - `dev_bench.py`: headless experiments.
 - `analyze.py` / `summarize.py`: CSV reporting.
+- `jump_service.py`: pure physics: jump window `[L, U]`, window-to-height, timing models.
+- `experiment.py`: planned obstacle list (`make_trials`), jump-time recorder, `TRIAL_HEADER`.
+- `simulate_experiment.py`: headless simulated player that writes a trial log.
+- `analyze_trials.py`: plain-language report and plot for trial logs. See `EXPERIMENT.md`.
 
 ## Invariants
-- `adaptive.py` and `gesture_lib.py` import no pygame, cv2, or mediapipe.
+- `adaptive.py`, `gesture_lib.py`, `jump_service.py` and `experiment.py` import no pygame, cv2, or mediapipe.
+- `experiment.TRIAL_HEADER` defines the trial-log column order (separate from `OUTCOME_HEADER`).
+- Experiment windows use `experiment.game_window`, not the textbook `jump_service.success_window` (frame-step corrections).
 - `resolve_obstacles` is the only place the controller updates `d`.
 - `Config` is the single tunable source; geometry and physics come from it.
 - `adaptive.OUTCOME_HEADER` and `adaptive.LATENCY_HEADER` define CSV column order.

@@ -39,6 +39,14 @@ from adaptive import (
     resolve_obstacles,
     try_spawn,
 )
+from experiment import (
+    ExperimentPlan,
+    TRIAL_HEADER,
+    TrialRecorder,
+    make_trials,
+    row_values,
+    trial_to_obstacle,
+)
 from gesture_lib import RuleClassifier
 
 WIDTH, HEIGHT = 1180, 720
@@ -285,6 +293,37 @@ def parse_args():
         default=None,
         help="Optional CSV path for obstacle-outcome logs",
     )
+    parser.add_argument(
+        "--experiment",
+        action="store_true",
+        help="Experiment mode: a fixed, shuffled list of obstacles with known "
+             "timing windows instead of adaptive difficulty (see EXPERIMENT.md)",
+    )
+    parser.add_argument(
+        "--experiment-speed",
+        type=float,
+        default=400.0,
+        help="Constant game speed in experiment mode, px/s (default 400)",
+    )
+    parser.add_argument(
+        "--experiment-blocks",
+        type=int,
+        default=4,
+        help="Blocks of 7 obstacles after the 3 warm-up obstacles (default 4 = 31 obstacles)",
+    )
+    parser.add_argument(
+        "--experiment-seed",
+        type=int,
+        default=None,
+        help="Seed for the obstacle order (default: random each run)",
+    )
+    parser.add_argument(
+        "--log-trials",
+        type=str,
+        default=None,
+        help="CSV path for the jump-timing log (one row per obstacle). "
+             "Works in experiment mode and in normal adaptive mode.",
+    )
     args = parser.parse_args()
     if args.rest_range is not None:
         lo, hi = args.rest_range
@@ -373,6 +412,21 @@ def main():
     presets = build_presets(args.start_d, args.preset)
     state = GameState(controller, config, presets=presets, start_preset=args.preset)
 
+    # Experiment mode: a planned list of obstacles instead of adaptive difficulty.
+    experiment_mode = args.experiment
+    experiment_rng = random.Random(args.experiment_seed)
+
+    def new_plan():
+        return ExperimentPlan(make_trials(
+            config, experiment_rng,
+            speed=args.experiment_speed, blocks=args.experiment_blocks,
+        ))
+
+    plan = new_plan() if experiment_mode else None
+
+    # The recorder notes when each jump happened, per obstacle (see experiment.py).
+    recorder = TrialRecorder(config) if (experiment_mode or args.log_trials) else None
+
     # Latency diagnostics (rolling windows + counters)
     frame_to_jump = LatencyTracker(config.LATENCY_WINDOW)
     open_to_jump = LatencyTracker(config.LATENCY_WINDOW)
@@ -410,6 +464,23 @@ def main():
             OUTCOME_HEADER
         )
 
+    trials_log = None
+    trials_writer = None
+    if args.log_trials:
+        trials_log = open(args.log_trials, "w", newline="")
+        _write_csv_meta(
+            trials_log, config,
+            extra={
+                "log_type": "trials",
+                "player": args.player,
+                "experiment": int(experiment_mode),
+                "experiment_speed": args.experiment_speed if experiment_mode else "",
+                "experiment_seed": args.experiment_seed if experiment_mode else "",
+            },
+        )
+        trials_writer = csv.writer(trials_log)
+        trials_writer.writerow(TRIAL_HEADER)
+
     valid_gestures = 0
     accepted_jumps = 0
     rejected_jumps = 0
@@ -427,13 +498,19 @@ def main():
     player_w, player_h = state.player_w, state.player_h
     gravity = state.gravity
     jump_velocity = state.jump_velocity
-    max_crashes = 0 if args.smoke_frames is not None else args.max_crashes
+    # In experiment mode every planned obstacle must be played, so crashes never end the run.
+    max_crashes = 0 if (args.smoke_frames is not None or experiment_mode) else args.max_crashes
     d_history: list[float] = []
 
     over_printed = False
 
     def clear_session_counters():
         nonlocal valid_gestures, accepted_jumps, rejected_jumps, over_printed
+        nonlocal plan, recorder
+        if experiment_mode:
+            plan = new_plan()           # a fresh shuffled list for every new run
+        if recorder is not None:
+            recorder = TrialRecorder(config)
         d_history.clear()
         valid_gestures = 0
         accepted_jumps = 0
@@ -445,6 +522,13 @@ def main():
         screen.blit(surf, (x, y))
 
     def game_over_stats_lines():
+        if experiment_mode:
+            return [
+                "EXPERIMENT COMPLETE",
+                f"Obstacles: {plan.total}   Cleared: {controller.successes}   "
+                f"Crashed: {controller.failures}",
+                "Press SPACE for a new run, Q to quit",
+            ]
         lines = [
             "GAME OVER",
             f"Crashed: {controller.failures}   Cleared: {controller.successes}",
@@ -461,6 +545,14 @@ def main():
         return lines
 
     def on_outcome(ob, outcome):
+        if recorder is not None:
+            row = recorder.finish(
+                ob, outcome, state.play_time,
+                player=args.player, session=state.tracker.current,
+            )
+            if row is not None and trials_writer is not None:
+                trials_writer.writerow(row_values(row))
+                trials_log.flush()
         if outcomes_writer is not None:
             t_s = state.play_time
             outcomes_writer.writerow([
@@ -569,6 +661,12 @@ def main():
             valid_gestures += 1
             if accepted:
                 accepted_jumps += 1
+                if recorder is not None:
+                    # Remember WHEN this jump happened relative to the next obstacle.
+                    recorder.note_jump(
+                        args.experiment_speed if experiment_mode
+                        else difficulty_profile(controller.d, config).speed
+                    )
             else:
                 rejected_jumps += 1
 
@@ -585,10 +683,29 @@ def main():
             if state.player_y > ground_y - player_h:
                 state.player_y = ground_y - player_h
 
-            speed = profile.speed
+            speed = args.experiment_speed if experiment_mode else profile.speed
 
             state.spawn_timer -= dt
-            if state.spawn_timer <= 0.0:
+            if state.spawn_timer <= 0.0 and experiment_mode:
+                # Experiment: take the next obstacle from the planned list.
+                trial = plan.take_next()
+                if trial is not None:
+                    new_ob = trial_to_obstacle(trial, config)
+                    # Same bookkeeping as the adaptive spawn: time since the last spawn.
+                    new_ob.gap_s = (
+                        state.play_time - state.last_spawn_t
+                        if state.last_spawn_t is not None else 0.0
+                    )
+                    state.last_spawn_t = state.play_time
+                    state.obstacles.append(new_ob)
+                    recorder.register(
+                        new_ob, target_w=trial.target_w,
+                        next_gap_px=trial.gap_after_px, index=trial.index,
+                    )
+                    state.spawn_timer = trial.interval_after or 1.0
+                else:
+                    state.spawn_timer = 1.0   # list used up: nothing more to spawn
+            elif state.spawn_timer <= 0.0:
                 prev_ob = state.obstacles[-1] if state.obstacles else None
                 new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
                 if new_ob is not None:
@@ -598,6 +715,8 @@ def main():
                     )
                     state.last_spawn_t = state.play_time
                     state.obstacles.append(new_ob)
+                    if recorder is not None:
+                        recorder.register(new_ob)
                     state.spawn_timer = next_spawn_timer(profile, rng, config)
                 else:
                     # Retry on the next frame.
@@ -620,9 +739,14 @@ def main():
             if max_crashes > 0 and controller.failures >= max_crashes:
                 state.phase = next_phase(state.phase, "game_over")
 
+            # Experiment ends once every planned obstacle has been decided.
+            if (experiment_mode and plan.exhausted
+                    and all(ob.done for ob in state.obstacles)):
+                state.phase = next_phase(state.phase, "game_over")
+
             state.play_time += dt
         else:
-            speed = profile.speed
+            speed = args.experiment_speed if experiment_mode else profile.speed
 
         loop_ms = (time.perf_counter() - loop_start) * 1000.0
         loop_ms_tracker.add(loop_ms)
@@ -656,7 +780,10 @@ def main():
 
         pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
 
-        draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
+        if experiment_mode:
+            draw_text(f"Experiment: obstacle {plan.spawned}/{plan.total}", 525, 25)
+        else:
+            draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
         pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
         draw_text(f"Gesture: {detected} ({score:.2f})", 525, 58)
         draw_text(f"Threshold: {state.threshold:.2f}  (+ / -)", 525, 91)
@@ -734,6 +861,8 @@ def main():
         latency_log.close()
     if outcomes_log is not None:
         outcomes_log.close()
+    if trials_log is not None:
+        trials_log.close()
     pygame.quit()
 
 

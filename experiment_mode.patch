@@ -693,10 +693,10 @@ index 0000000..70d095e
 +    sys.exit(main())
 diff --git a/experiment.py b/experiment.py
 new file mode 100644
-index 0000000..e15cb82
+index 0000000..4d8bc83
 --- /dev/null
 +++ b/experiment.py
-@@ -0,0 +1,405 @@
+@@ -0,0 +1,412 @@
 +"""Experiment mode: a designed list of obstacles, and a recorder for jump timing.
 +
 +No pygame, cv2, or mediapipe imports, so everything here can be unit-tested and
@@ -1001,6 +1001,13 @@ index 0000000..e15cb82
 +        if index is None:
 +            index = self._count
 +        self._count += 1
++        # The gap to the NEXT obstacle is only known once that obstacle spawns.
++        # If the previous obstacle is still on its way and had no planned gap
++        # (adaptive modes), fill it in now: spawn position minus the previous
++        # obstacle's right edge.  Matters when gaps are tight (probe mode).
++        if self._live and self._live[-1].next_gap_px is None:
++            prev = self._live[-1].obstacle
++            self._live[-1].next_gap_px = max(0.0, obstacle.x - (prev.x + prev.w))
 +        self._live.append(_LiveTrial(obstacle, index, target_w, next_gap_px))
 +
 +    # -- step 2: the player jumps ----------------------------------------
@@ -1103,7 +1110,7 @@ index 0000000..e15cb82
 +    """Row dict -> list in TRIAL_HEADER order, ready for ``csv.writer``."""
 +    return [row[name] for name in TRIAL_HEADER]
 diff --git a/game.py b/game.py
-index 31e5f64..38c7f93 100644
+index 24b9cbf..109c72f 100644
 --- a/game.py
 +++ b/game.py
 @@ -39,6 +39,14 @@ from adaptive import (
@@ -1121,7 +1128,7 @@ index 31e5f64..38c7f93 100644
  from gesture_lib import RuleClassifier
  
  WIDTH, HEIGHT = 1180, 720
-@@ -259,6 +267,37 @@ def parse_args():
+@@ -285,6 +293,37 @@ def parse_args():
          default=None,
          help="Optional CSV path for obstacle-outcome logs",
      )
@@ -1156,10 +1163,10 @@ index 31e5f64..38c7f93 100644
 +        help="CSV path for the jump-timing log (one row per obstacle). "
 +             "Works in experiment mode and in normal adaptive mode.",
 +    )
-     return parser.parse_args()
- 
- 
-@@ -336,6 +375,21 @@ def main():
+     args = parser.parse_args()
+     if args.rest_range is not None:
+         lo, hi = args.rest_range
+@@ -373,6 +412,21 @@ def main():
      presets = build_presets(args.start_d, args.preset)
      state = GameState(controller, config, presets=presets, start_preset=args.preset)
  
@@ -1181,7 +1188,7 @@ index 31e5f64..38c7f93 100644
      # Latency diagnostics (rolling windows + counters)
      frame_to_jump = LatencyTracker(config.LATENCY_WINDOW)
      open_to_jump = LatencyTracker(config.LATENCY_WINDOW)
-@@ -373,6 +427,23 @@ def main():
+@@ -410,6 +464,23 @@ def main():
              OUTCOME_HEADER
          )
  
@@ -1205,7 +1212,7 @@ index 31e5f64..38c7f93 100644
      valid_gestures = 0
      accepted_jumps = 0
      rejected_jumps = 0
-@@ -390,13 +461,19 @@ def main():
+@@ -427,13 +498,19 @@ def main():
      player_w, player_h = state.player_w, state.player_h
      gravity = state.gravity
      jump_velocity = state.jump_velocity
@@ -1226,7 +1233,7 @@ index 31e5f64..38c7f93 100644
          d_history.clear()
          valid_gestures = 0
          accepted_jumps = 0
-@@ -408,6 +485,13 @@ def main():
+@@ -445,6 +522,13 @@ def main():
          screen.blit(surf, (x, y))
  
      def game_over_stats_lines():
@@ -1240,7 +1247,7 @@ index 31e5f64..38c7f93 100644
          lines = [
              "GAME OVER",
              f"Crashed: {controller.failures}   Cleared: {controller.successes}",
-@@ -424,6 +508,14 @@ def main():
+@@ -461,6 +545,14 @@ def main():
          return lines
  
      def on_outcome(ob, outcome):
@@ -1255,7 +1262,7 @@ index 31e5f64..38c7f93 100644
          if outcomes_writer is not None:
              t_s = state.play_time
              outcomes_writer.writerow([
-@@ -531,6 +623,12 @@ def main():
+@@ -569,6 +661,12 @@ def main():
              valid_gestures += 1
              if accepted:
                  accepted_jumps += 1
@@ -1268,7 +1275,7 @@ index 31e5f64..38c7f93 100644
              else:
                  rejected_jumps += 1
  
-@@ -547,14 +645,29 @@ def main():
+@@ -585,10 +683,29 @@ def main():
              if state.player_y > ground_y - player_h:
                  state.player_y = ground_y - player_h
  
@@ -1282,6 +1289,12 @@ index 31e5f64..38c7f93 100644
 +                trial = plan.take_next()
 +                if trial is not None:
 +                    new_ob = trial_to_obstacle(trial, config)
++                    # Same bookkeeping as the adaptive spawn: time since the last spawn.
++                    new_ob.gap_s = (
++                        state.play_time - state.last_spawn_t
++                        if state.last_spawn_t is not None else 0.0
++                    )
++                    state.last_spawn_t = state.play_time
 +                    state.obstacles.append(new_ob)
 +                    recorder.register(
 +                        new_ob, target_w=trial.target_w,
@@ -1294,13 +1307,16 @@ index 31e5f64..38c7f93 100644
                  prev_ob = state.obstacles[-1] if state.obstacles else None
                  new_ob = try_spawn(prev_ob, profile, speed, rng, config, controller.d)
                  if new_ob is not None:
+@@ -598,6 +715,8 @@ def main():
+                     )
+                     state.last_spawn_t = state.play_time
                      state.obstacles.append(new_ob)
 +                    if recorder is not None:
 +                        recorder.register(new_ob)
                      state.spawn_timer = next_spawn_timer(profile, rng, config)
                  else:
                      # Retry on the next frame.
-@@ -577,9 +690,14 @@ def main():
+@@ -620,9 +739,14 @@ def main():
              if max_crashes > 0 and controller.failures >= max_crashes:
                  state.phase = next_phase(state.phase, "game_over")
  
@@ -1316,7 +1332,7 @@ index 31e5f64..38c7f93 100644
  
          loop_ms = (time.perf_counter() - loop_start) * 1000.0
          loop_ms_tracker.add(loop_ms)
-@@ -613,7 +731,10 @@ def main():
+@@ -656,7 +780,10 @@ def main():
  
          pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
  
@@ -1328,7 +1344,7 @@ index 31e5f64..38c7f93 100644
          pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
          draw_text(f"Gesture: {detected} ({score:.2f})", 525, 58)
          draw_text(f"Threshold: {state.threshold:.2f}  (+ / -)", 525, 91)
-@@ -691,6 +812,8 @@ def main():
+@@ -734,6 +861,8 @@ def main():
          latency_log.close()
      if outcomes_log is not None:
          outcomes_log.close()
@@ -1734,6 +1750,55 @@ index 0000000..7fec56c
 +
 +if __name__ == "__main__":
 +    sys.exit(main())
+diff --git a/temp.md b/temp.md
+new file mode 100644
+index 0000000..10c3e1a
+--- /dev/null
++++ b/temp.md
+@@ -0,0 +1,43 @@
++# temp.md: state of the docs (delete this file after the cleanup)
++
++**Status: transitional.** The documentation is currently a mix of useful explanations, fast-moving facts that go stale, and files that are not documentation at all. This file says which is which until the cleanup is done. After that, delete it.
++
++## For agents working in this repo right now
++
++1. Read `AGENTS.md` and this file. Nothing else under `*.md` is required reading.
++2. Do **not** treat any other `.md` file as the source of truth for numbers, defaults, flags or file lists. The code, the tests and `--help` win. When they disagree with a doc, the doc is wrong.
++3. Do not read the `.patch` files. They are not documentation, and one is already out of date.
++4. Do not add new `.md` files. Do not add numbers, option defaults or file lists to existing docs; point to where they live instead.
++
++## Rules for the cleanup
++
++- Docs explain **why**: the idea, the reasoning, the trade-off. They do not repeat what the code says.
++- Anything that changes often lives only in code, tests or generated output: constants (`Config`), CLI options (`--help`), measured numbers (`dev_bench.py report`), the list of files.
++- Two audiences, kept apart: **humans** (learning, deciding) and **agents** (invariants and commands to work safely). A file serves one of them.
++
++## What each file is today
++
++| File | Audience | What it is | Problem | Proposed action |
++|---|---|---|---|---|
++| `AGENTS.md` | agents | File map, invariants, commands | The file map is a list that goes stale as files are added | Keep invariants and commands. Cut the file map down to one line per area, or drop it |
++| `README.md` | humans | Quick start, controls, data commands | Repeats options and example commands that `--help` already gives | Keep the purpose and the first run. Link to the rest instead of copying it |
++| `DEV.md` | humans (developers) | How the difficulty, physics and spawn rhythm work | Mixes the reasoning with tuned numbers ("about 1.9 s at d = 1", "sd 0.4-0.6 s", "never below 0.44 s") | Keep the reasoning. Move the numbers to `dev_bench.py report` |
++| `EXPERIMENT.md` | humans (learning) | Educational guide to experiment mode and its report | The worked example uses today's constants (87 px, 0.18 s, 388 ms); defaults like "31 obstacles, 70 s" can change | Keep it as the "why and how to read the result" guide. Mark the example as illustrative or regenerate it |
++| `dino_jump_success_model.md` | humans (theory) | Derivation of the jump window and the player models | Stable reasoning, but written for the textbook physics. The game's frame-by-frame corrections are only in `experiment.py` | Keep. Add a short note on the frame corrections, or link to `game_physics` |
++| `gesture_lab_intentions_and_next_steps.md` | humans | Plan: intentions, requirements, next steps | A planning document. Steps 1 to 3 are done, so it is already stale | Move the "intention" paragraph into `README.md`. Delete the rest |
++| `experiment_mode.patch` | nobody | A patch of the experiment-mode change | Not documentation. No longer applies to the current code. The change is already in the files | Delete |
++| `wild_spawn.patch` | nobody | A patch of the spawn-rhythm change | Not documentation. The change is already in git history | Delete |
++| `temp.md` | agents, humans | This file | Exists only to explain the mess | Delete after the cleanup |
++
++## Open decisions
++
++- **Where do human docs live?** A `docs/` folder would let `AGENTS.md` say "do not read `docs/` unless asked", which is the clearest way to separate the audiences. Today everything is in the repo root.
++- **Where do the experiment-mode defaults live?** The obstacle list, speed and window widths are code constants in `experiment.py`. `EXPERIMENT.md` should point there and not repeat them.
++- **Is `jump_service.py` code or documentation?** It is code. Its docstrings carry the derivation, so `dino_jump_success_model.md` could shrink to the reasoning only.
++
++## Done means
++
++- `AGENTS.md` has no list that grows with every new file.
++- No `.md` file contains a number that `Config`, `--help` or a test can produce.
++- No `.patch` files in the repo.
++- `temp.md` deleted.
 diff --git a/tests/test_analyze_trials.py b/tests/test_analyze_trials.py
 new file mode 100644
 index 0000000..88ae12c
@@ -1843,10 +1908,10 @@ index 0000000..88ae12c
 +    assert png.exists() and png.stat().st_size > 5000
 diff --git a/tests/test_experiment.py b/tests/test_experiment.py
 new file mode 100644
-index 0000000..d870ae9
+index 0000000..b1168bf
 --- /dev/null
 +++ b/tests/test_experiment.py
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,203 @@
 +"""Tests for experiment.py: the obstacle plan, the recorder, and the physics
 +correction for the game's frame-by-frame update."""
 +import random
@@ -2030,6 +2095,26 @@ index 0000000..d870ae9
 +                deltas.append(float(r["delta"]))
 +    assert statistics.fmean(deltas) == pytest.approx(0.03 + ex.FRAME_DT / 2, abs=0.01)
 +    assert statistics.stdev(deltas) == pytest.approx(0.05, abs=0.01)
++
++
++def test_gap_to_next_obstacle_is_filled_in_when_it_spawns():
++    """Adaptive modes do not plan gaps; the recorder learns them at spawn time."""
++    rec = ex.TrialRecorder(CFG)
++    first = _ob(300.0, w=30.0)                       # right edge at FRONT + 330
++    second = Obstacle(x=FRONT + 330.0 + 120.0, w=30.0, h=60.0,
++                      d_spawn=0.0, speed_spawn=400.0)  # 120 px behind it
++    rec.register(first)
++    rec.register(second)
++    row = rec.finish(first, 1, 1.0)
++    assert float(row["next_gap_px"]) == pytest.approx(120.0)
++
++
++def test_planned_gap_is_not_overwritten():
++    rec = ex.TrialRecorder(CFG)
++    first, second = _ob(300.0), _ob(900.0)
++    rec.register(first, next_gap_px=555.0)
++    rec.register(second)
++    assert float(rec.finish(first, 1, 1.0)["next_gap_px"]) == pytest.approx(555.0)
 diff --git a/tests/test_jump_service.py b/tests/test_jump_service.py
 new file mode 100644
 index 0000000..5feb418

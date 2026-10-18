@@ -87,6 +87,17 @@ python dev_bench.py simulate --frames 2000 --csv sim.csv
 
 See all options with `python game.py --help`.
 
+## Experiment mode: measuring a player
+
+Instead of adaptive difficulty, the game can play a designed list of obstacles and record exactly when you jump. See [EXPERIMENT.md](EXPERIMENT.md) for what it measures and how to read the report.
+
+```bash
+python game.py --experiment --log-trials data/alice_trials.csv --player alice
+python analyze_trials.py data/alice_trials.csv --plot data/alice_report.png
+
+python simulate_experiment.py --mu 0.03 --sigma 0.05 --out sim_trials.csv   # no camera needed
+```
+
 ## Tests
 
 ```bash
