@@ -1,3 +1,7 @@
+Todo, remove once done: The document is out of date. Section 2 still says the jump time isn’t logged, and section 6 lists steps that are finished.
+
+
+
 # Gesture Lab: Intentions, Requirements and Next Steps
 
 ## 1. Intention

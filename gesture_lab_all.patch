@@ -1,0 +1,1207 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 06a3264..712b6a2 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -12,6 +12,10 @@ Slow-changing reference for the gesture lab. Regenerable numbers live in code, t
+ - `experiment.py`: planned obstacle list (`make_trials`), jump-time recorder, `TRIAL_HEADER`.
+ - `simulate_experiment.py`: headless simulated player that writes a trial log.
+ - `analyze_trials.py`: plain-language report and plot for trial logs. See `EXPERIMENT.md`.
++- `report_html.py`: one-file HTML report (charts + drift model); `analyze_trials.py --html` calls it.
++- `progressive.py`: `ProgressivePlan` (speed ladder + staircase); same interface as `ExperimentPlan` plus `report()`.
++- `gesture_lib.py`: also `ThumbClassifier` / `make_classifier` for `game.py --gesture open|thumb`.
++- `FUTURE.md`: research context and ideas not built yet.
+ 
+ ## Invariants
+ - `adaptive.py`, `gesture_lib.py`, `jump_service.py` and `experiment.py` import no pygame, cv2, or mediapipe.
+diff --git a/FUTURE.md b/FUTURE.md
+new file mode 100644
+index 0000000..b0e130c
+--- /dev/null
++++ b/FUTURE.md
+@@ -0,0 +1,58 @@
++# Future work
++
++Ideas and research context that are **not built yet**. What exists is in `README.md` and `EXPERIMENT.md`.
++
++## Where this fits
++
++The core model here, "timing error is roughly Gaussian and a jump succeeds if it lands inside the safe window", is the standard idea in *temporal pointing* research (hitting a moving target at the right moment). Starting points from a short search; read them before citing:
++
++- Modelling error rates in temporal pointing (CHI 2016): https://displaydaily.com/wp-content/uploads/2016/06/modeling-errors-chi2016.pdf
++- Moving target selection: a cue integration model (CHI 2018): https://acris.aalto.fi/ws/portalfiles/portal/21506957/ELEC_Lee_et_al_Moving_target_CHI2018.pdf
++- User performance in consecutive temporal pointing: https://dgist.elsevierpure.com/en/publications/user-performance-in-consecutive-temporal-pointing-an-exploratory-/
++- The tradeoff between spatial jitter and latency in pointing tasks: https://vvise.iat.sfu.ca/pubs/pavlovych2009tradeoff
++- In-air un-instrumented pointing performance: https://yorkspace.library.yorku.ca/items/f0554c6f-d5c7-432a-8971-c3f27d5b27f5
++
++The gap this lab could fill: temporal precision of **camera-tracked hand gestures**, with windows defined by game physics, across gestures and speeds. I found no such study in two quick searches, but that is not proof none exists. Check properly before claiming novelty.
++
++## Questions the lab can already answer
++
++1. How does timing spread depend on the jump gesture (open hand vs thumb up)?
++2. How does it depend on speed? (`--progressive` gives a threshold window per speed.)
++3. Are failures Gaussian timing errors, or Gaussian plus misfires and misses?
++4. Does bias drift within a session? (The HTML report has a drift model.)
++5. Engagement: needs a survey step and a randomized manipulation (see below).
++
++**Sizing a study.** The uncertainty on a spread is about σ / √(2n). To see a 15 ms difference in spread between two gestures for one player (σ about 70 ms) you need about 100 jumps per gesture (n ≈ (σ / SE)², with SE of the difference about 7 ms). Run `simulate_experiment.py` first to check a design before anyone plays. A sensible first study: within players, counterbalanced gesture order, 8 to 10 players, about 3 sessions per gesture.
++
++## Methods beyond what exists
++
++- **Hierarchical Bayesian model.** Each player gets a bias and spread drawn from a population. With about 30 jumps per player it gives steadier estimates than separate fits, and it is how to test a gesture effect across players (PyMC, Stan or brms).
++- **Lapse rate.** Model misfires and misses as a separate probability so a few extreme early jumps stop inflating the spread. Standard in psychophysics; the third session suggested it (crashes on the widest windows, heavy tails).
++- **Model comparison.** Gaussian vs Student-t vs Gaussian plus lapses, compared by leave-one-out cross-validation instead of reading a QQ plot by eye.
++- **Bayesian adaptive design.** Choose the next obstacle height to maximize information about bias and spread (QUEST, the Psi method, expected information gain). `progressive.py` is a simple staircase; this would be its principled upgrade.
++- **Counterbalancing.** Randomize condition order across players (Latin square) so learning is not confused with a gesture effect.
++- **Effective window.** Report 4.13 x spread (the convention in pointing studies) so gestures compare fairly across target widths.
++- **Simulation-based power analysis.** Simulate the whole study, including the planned model, before collecting data.
++- **Drift beyond one session.** The Kalman drift model currently runs per file; run it over pooled sessions with a session effect.
++
++The drift model's behavior (from a simulation of 200 sessions each, 31 jumps): it flagged drift in about 1.5% of sessions with a flat bias, in 87% of clear drifts at 40 ms jump noise, but only in about 42% at 60 ms noise. A "no clear drift" result is therefore weak evidence at this session length.
++
++## Gameplay ideas
++
++- **A director with patterns.** Singles, tight doubles (where the gap becomes the binding bound), staircases of heights, rests. Give each pattern a cost, its expected failures under the player's fitted model, `P(clear) = Phi((W/2 - mu)/sigma) - Phi((-W/2 - mu)/sigma)`, and run a tension curve (build, spike, release) that spends a budget. Variety comes from sequencing, not from a better single difficulty number.
++- **Calibrate, play, re-measure.** A short staircase estimates the threshold, a play phase varies patterns around it, a final block re-measures.
++- **More actions.** A second gesture to duck with low obstacles; more poses. Log **every** raw gesture event (not only jumps near obstacles) so misses and misfires per gesture can be counted, and record each gesture's stability setting in the log header, since a pose that must hold m frames adds delay.
++- **Feedback as an experiment.** Show the HTML report to half the players and compare their next session (knowledge of results may change timing).
++
++## Collecting data from other people
++
++- A pseudonymous player ID, a consent line, and 2 to 3 survey items (enjoyment, fairness, wish to continue) saved with the session.
++- A data README for the CSV columns, a `data/valid/` folder, a reproducible notebook, and a Zenodo release for a citable snapshot.
++- If participants are not just friends, check whether ethics approval is needed. Logs contain no camera images; keep it that way.
++
++## Known gaps
++
++- **Thumb gesture** is tuned on idealized synthetic hands. It needs a check with real hands (orientation, handedness, different thumbs); `THUMB_RISE_MIN` in `gesture_lib.py` is the knob.
++- **Progressive mode** is verified only with a scripted player; it needs a pilot with people to see whether it feels less repetitive than the fixed list.
++- **Bias includes delay.** Camera sampling, detection, and stability frames add to the measured bias. Log the measured camera FPS in the trial header.
++- **Old logs.** Sessions recorded before commit `0901def` have wrong windows for tall obstacles; do not pool them.
+diff --git a/README.md b/README.md
+index cb2a0d2..bc3f6d9 100644
+--- a/README.md
++++ b/README.md
+@@ -1,124 +1,113 @@
+ # Gesture Lab
+ 
+-A small, educational hand-gesture project for students. Play a runner with an open-hand jump, tune the adaptive difficulty, and analyze the logs.
++A hand-controlled runner that doubles as a small experiment: how precisely can you time a jump with a hand gesture? Play it, then see a report on your own timing.
+ 
+-## Quick start
++## Play in five minutes
+ 
+ ```bash
+ python -m venv .venv
+ source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
+ pip install -r requirements.txt
+-pytest -q
+ python game.py
+ ```
+ 
+-The window opens on a ready screen; click it and press SPACE.
++A window opens (it may hide behind other windows). Click it and press **SPACE**.
+ 
+-## Why this project exists
++- **First run needs internet once.** On some installs the hand model (`hand_landmarker.task`) downloads on first use. For offline use, place it at `~/.cache/fontys_gesture_lab/hand_landmarker.task`.
++- **Setup:** sit about an arm's length from the camera, hand fully in view, fingers pointing up, good light.
++- **Jump:** open your hand. **Close it again** before the next jump (that re-arms it).
+ 
+-We wanted a hand-controlled Dino-style game to get students interested in AI, using a pretrained hand model. The model worked: an open hand reliably produced a "jump" signal. But the game was unplayable for some people and boring for others. Fixing that turned out to be a data problem: physics, human timing, and a feedback loop. Most of this repo is about that part. It is a teaching example that a good model is not a good product.
++## Pick a mode
+ 
+-## How it fits together
+-
+-| Layer | Files | What they do |
+-|---|---|---|
+-| Perception | `gesture_lib.py`, `mp_compat.py` | Turn camera frames into a single "jump" event. |
+-| Game design | `adaptive.py` | Physics, difficulty profile, and obstacle rules. |
+-| Player modelling and control | `AdaptiveController`, `analyze.py`, `summarize.py` | Adapt d from 0/1 outcomes and report on behaviour. |
+-
+-## Learning path
++| I want to... | Command |
++|---|---|
++| Just play | `python game.py` |
++| Jump with a thumb instead of an open hand | `python game.py --gesture thumb` (thumb up from a fist; lower it to re-arm) |
++| Be measured: a fixed list of 31 obstacles, same for everyone with the same seed | `python game.py --experiment --experiment-seed 42 --player alice --log-trials data/alice_1.csv` |
++| A progressive challenge: it finds your narrowest feasible window, then speeds up | `python game.py --progressive --player alice --log-trials data/alice_prog_1.csv` |
+ 
+-1. Run the notebook to see how landmarks become features.
+-2. Play `game.py` and watch `d` adapt.
+-3. Analyze your own logs with `analyze.py`.
++A measured or progressive session takes one to two minutes. When "EXPERIMENT COMPLETE" appears, press **Q** to quit.
+ 
+ ## Controls
+ 
+ | Input | Action |
+ |---|---|
+ | **SPACE** | Start / pause / resume / retry |
+-| **Open hand** | Jump (once per stable gesture) |
+-| **1 / 2 / 3** | Easy / normal / hard preset |
+-| **+ / -** | Raise / lower confidence threshold |
+-| **D** | Toggle debug overlay |
++| **Open hand** (or **thumb up** with `--gesture thumb`) | Jump |
++| **D** | Debug overlay (shows the detected gesture, its score, and FPS) |
++| **1 / 2 / 3** | Easy / normal / hard preset (normal mode only) |
++| **+ / -** | Raise / lower the confidence threshold |
+ | **Q** or **Esc** | Quit |
+ 
+-Close your hand to re-arm the jump. Preset changes clear obstacles and start a new session.
++## See your results
+ 
+-## Difficulty presets
++```bash
++python analyze_trials.py data/alice_1.csv                      # plain-language report in the terminal
++python analyze_trials.py data/alice_1.csv --html report.html   # charts, in your browser
++python analyze_trials.py data/alice_1.csv --plot report.png    # four-panel picture
++python analyze_trials.py data/alice_1.csv data/alice_2.csv     # pool several sessions
++```
+ 
+-| Preset | d | Stability | Threshold |
+-|---|---|---|---|
+-| easy | 0.80 | 1 | 0.50 |
+-| normal | 0.94 | 2 | 0.60 |
+-| hard | 1.00 | 3 | 0.70 |
++The key numbers are **bias** (do you jump early or late?) and **spread** (how scattered are your jumps?). The HTML report also checks whether your bias drifted during the session. [EXPERIMENT.md](EXPERIMENT.md) explains how to read them. About 30 jumps give wide uncertainty; pool sessions for firmer answers.
+ 
+-Presets only set the starting difficulty (d, threshold, stability). The controller then adapts to your actual success rate, so the choice of preset matters mainly for the first few obstacles.
++## Collecting good data
+ 
+-## Game over and `--max-crashes`
++- **One file per session**, with a new name each time. Reusing a name overwrites the old file.
++- **Use sessions from commit `0901def` or later.** Earlier versions tied the physics to the camera speed, so narrow windows were not what the log said.
++- For comparing players, give everyone the same `--experiment-seed`. For repeat sessions of one player, change the seed so the order cannot be learned.
++- A 30 FPS webcam is fine: physics runs at a fixed 1/60 s. The camera only affects when a gesture is noticed.
++- CSV files are ignored by git (see `.gitignore`); add a `!data/name.csv` line to commit one on purpose.
+ 
+-Crashes are counted since the game started or the preset changed. After `--max-crashes N` (default 3) the game shows on-screen stats and waits for SPACE to retry. Set `--max-crashes 0` to disable the stop. Games are short by default, so the controller adapts little within one; raise `--max-crashes` or use `0` for longer sessions.
++## If something goes wrong
+ 
+-## Data + bench commands
++- **Window not visible:** it may open behind other windows; click the game icon in the dock or taskbar.
++- **Camera unavailable:** close other apps using it, check OS permissions, try `--camera 1`.
++- **No hand detected:** improve lighting, show the whole hand, move closer. The debug overlay (D) shows what the game sees.
++- **Thumb not recognised:** keep the other fingers curled and the hand upright, and lift the thumb clearly above the knuckle. The threshold is `THUMB_RISE_MIN` in `gesture_lib.py`. The thumb option is new and tuned on idealized hands, so expect to adjust it.
++- **Slow laptop:** lower the camera resolution or use `--preset 1`.
+ 
+-Gather a real session:
++## How it fits together
+ 
+-```bash
+-python game.py --log-outcomes data/alice.csv --log-latency data/alice_latency.csv --player alice --max-crashes 0
+-```
++| Layer | Files |
++|---|---|
++| Perception: camera frames to a jump event | `gesture_lib.py`, `mp_compat.py` |
++| Game: physics, obstacles, difficulty | `game.py`, `adaptive.py`, `jump_service.py` |
++| Experiment: planned obstacle lists, jump-time recording | `experiment.py`, `progressive.py` |
++| Analysis | `analyze_trials.py`, `report_html.py`, `analyze.py`, `summarize.py` |
++
++More: [EXPERIMENT.md](EXPERIMENT.md) (what is measured), [FUTURE.md](FUTURE.md) (ideas and research context), `AGENTS.md` (rules for contributors and agents), `gesture_landmarks_lab.ipynb` (how landmarks become features).
++
++## Classic adaptive mode
+ 
+-Use `--max-crashes 0` for a long run so the controller has time to adapt. Analyze with:
++Without `--experiment` or `--progressive`, a controller adapts a single difficulty number `d` to your success rate. It is fun for a few runs but settles into a rhythm, which is why the experiment modes exist.
+ 
+ ```bash
++python game.py --log-outcomes data/alice.csv --log-latency data/alice_latency.csv --player alice --max-crashes 0
+ python analyze.py data/alice.csv
+ python summarize.py data/alice.csv
+ ```
+ 
+-Run headless smoke or simulation:
+-
+-```bash
+-SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120 --log-outcomes run.csv
+-python analyze.py run.csv
++After `--max-crashes N` (default 3) the game stops and shows stats; `0` disables that. See all options with `python game.py --help`.
+ 
+-python dev_bench.py feasibility
+-python dev_bench.py report
+-python dev_bench.py simulate --frames 2000 --csv sim.csv
+-```
++## Difficulty presets
+ 
+-See all options with `python game.py --help`.
++| Preset | d | Stability | Threshold |
++|---|---|---|---|
++| easy | 0.80 | 1 | 0.50 |
++| normal | 0.94 | 2 | 0.60 |
++| hard | 1.00 | 3 | 0.70 |
+ 
+-## Experiment mode: measuring a player
++Presets only set the starting difficulty (`d`, confidence threshold, stability frames); the controller then adapts to your success rate. Stability is how many consecutive frames the gesture must be held before it counts as a jump.
+ 
+-Instead of adaptive difficulty, the game can play a designed list of obstacles and record exactly when you jump. See [EXPERIMENT.md](EXPERIMENT.md) for what it measures and how to read the report.
++## For developers
+ 
+ ```bash
+-python game.py --experiment --log-trials data/alice_trials.csv --player alice
+-python analyze_trials.py data/alice_trials.csv --plot data/alice_report.png
+-
++pytest -q                          # pure logic tests; camera tests skip without a webcam
+ python simulate_experiment.py --mu 0.03 --sigma 0.05 --out sim_trials.csv   # no camera needed
++python dev_bench.py report         # difficulty and feasibility benchmarks
++SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120      # headless smoke run
+ ```
+ 
+-## Tests
+-
+-```bash
+-pytest -q
+-```
+-
+-- `tests/test_gesture_lib.py`: landmark helpers and rule classifier.
+-- `tests/test_adaptive.py`: difficulty, controller, physics, obstacle resolution, phase flow, and game-loop smoke tests.
+-- `tests/test_camera.py`: webcam checks, skipped if no camera.
+-
+-## Platform notes
+-
+-- Python 3.10–3.13 are supported.
+-- macOS, Windows, and Linux should work; the project was developed on macOS.
+-- If `cv2.VideoCapture(0)` cannot open the webcam, try `--camera 1`.
+-- Some MediaPipe wheels (Python 3.13 / Apple Silicon) ship only the Tasks API; `mp_compat.py` falls back automatically.
+-- The normal game needs a display; headless smoke runs work with `SDL_VIDEODRIVER=dummy`.
+-
+-## Troubleshooting
+-
+-- **Window not visible:** it may open behind other windows. Click the game icon in the dock/taskbar.
+-- **Camera unavailable:** close other apps using the webcam and check OS permissions; try `--camera 1`.
+-- **No hand detected:** improve lighting, show the full hand, move closer.
+-- **Slow laptop:** lower camera resolution or choose the Easy preset.
++- Python 3.10 to 3.13. macOS, Windows and Linux should work; developed on macOS.
++- Some MediaPipe wheels (Python 3.13, Apple Silicon) ship only the Tasks API; `mp_compat.py` falls back automatically.
++- Tests: `tests/test_gesture_lib.py` (landmarks, classifiers), `tests/test_adaptive.py` (difficulty, physics, game loop), `tests/test_experiment.py`, `tests/test_progressive.py`, `tests/test_camera.py` (skipped without a camera).
+diff --git a/adaptive.py b/adaptive.py
+index a60568d..7979a94 100644
+--- a/adaptive.py
++++ b/adaptive.py
+@@ -508,6 +508,7 @@ def resolve_obstacles(
+     controller: AdaptiveController,  # forward declaration handled by annotations
+     config: Optional[Config] = None,
+     on_outcome: Optional[Callable[[Obstacle, int], None]] = None,
++    per_obstacle_speed: bool = False,
+ ) -> list[Obstacle]:
+     """Move obstacles, record exactly one outcome per obstacle, and update ``d``.
+ 
+@@ -531,7 +532,8 @@ def resolve_obstacles(
+             _record(ob, 0)
+ 
+         # Every obstacle keeps scrolling, even after it is done.
+-        ob.x -= speed * dt
++        # per_obstacle_speed: each obstacle keeps the speed it spawned with (speed ladder).
++        ob.x -= (ob.speed_spawn if per_obstacle_speed and ob.speed_spawn > 0 else speed) * dt
+ 
+         # Success once the obstacle has fully passed the player.
+         if not ob.done and ob.x + ob.w < player_x:
+diff --git a/analyze_trials.py b/analyze_trials.py
+index 70d095e..26d83a4 100644
+--- a/analyze_trials.py
++++ b/analyze_trials.py
+@@ -482,6 +482,7 @@ def main(argv=None) -> int:
+     parser = argparse.ArgumentParser(description="Analyze jump-timing trial logs.")
+     parser.add_argument("files", nargs="+", help="trial CSV file(s)")
+     parser.add_argument("--plot", metavar="PNG", help="also save the four-panel picture")
++    parser.add_argument("--html", metavar="HTML", help="also save a self-contained HTML report (adds a drift model)")
+     args = parser.parse_args(argv)
+ 
+     rows = load_trials(args.files)
+@@ -489,6 +490,11 @@ def main(argv=None) -> int:
+     if args.plot and rows:
+         make_plot(rows, summary, args.plot)
+         print(f"Picture saved to {args.plot}")
++    if args.html and rows:
++        from report_html import build_html   # imported here: report_html imports this module
++        with open(args.html, "w", encoding="utf-8") as f:
++            f.write(build_html(rows))
++        print(f"HTML report saved to {args.html}")
+     return 0
+ 
+ 
+diff --git a/experiment.py b/experiment.py
+index 4d8bc83..e398f13 100644
+--- a/experiment.py
++++ b/experiment.py
+@@ -312,7 +312,7 @@ class TrialRecorder:
+         self._live.append(_LiveTrial(obstacle, index, target_w, next_gap_px))
+ 
+     # -- step 2: the player jumps ----------------------------------------
+-    def note_jump(self, speed: float) -> Optional[float]:
++    def note_jump(self, speed: float, per_obstacle: bool = False) -> Optional[float]:
+         """Remember when this jump happened, for the obstacle it belongs to.
+ 
+         A jump belongs to the nearest obstacle that has NOT yet reached the
+@@ -332,6 +332,8 @@ class TrialRecorder:
+         if not ahead or speed <= 0.0:
+             return None
+         nearest = min(ahead, key=lambda lt: lt.obstacle.x)
++        if per_obstacle and nearest.obstacle.speed_spawn > 0:
++            speed = nearest.obstacle.speed_spawn     # speed ladder: use the obstacle's own speed
+         t_j = -(nearest.obstacle.x - player_front) / speed
+         nearest.t_j = t_j
+         return t_j
+diff --git a/game.py b/game.py
+index e9144ba..cd10cbb 100644
+--- a/game.py
++++ b/game.py
+@@ -49,7 +49,8 @@ from experiment import (
+     row_values,
+     trial_to_obstacle,
+ )
+-from gesture_lib import RuleClassifier
++from gesture_lib import JUMP_GESTURES, make_classifier
++from progressive import ProgressivePlan
+ 
+ WIDTH, HEIGHT = 1180, 720
+ CAM_W, CAM_H = 480, 360
+@@ -326,6 +327,21 @@ def parse_args():
+         help="CSV path for the jump-timing log (one row per obstacle). "
+              "Works in experiment mode and in normal adaptive mode.",
+     )
++    parser.add_argument(
++        "--gesture", choices=JUMP_GESTURES, default="open",
++        help="Jump gesture: 'open' = open hand (default), 'thumb' = thumb up from a fist.",
++    )
++    parser.add_argument(
++        "--progressive", action="store_true",
++        help="Progressive session: a staircase finds your narrowest feasible window, "
++             "then the speed rises (implies experiment mode; use with --log-trials).",
++    )
++    parser.add_argument("--speed-step", type=float, default=60.0,
++                        help="--progressive: speed increase per level, px/s (default 60)")
++    parser.add_argument("--levels", type=int, default=3,
++                        help="--progressive: number of speed levels (default 3)")
++    parser.add_argument("--per-level", type=int, default=10,
++                        help="--progressive: obstacles per level (default 10)")
+     args = parser.parse_args()
+     if args.rest_range is not None:
+         lo, hi = args.rest_range
+@@ -364,7 +380,9 @@ def main():
+     args = parse_args()
+ 
+     pygame.init()
+-    pygame.display.set_caption("Fontys Gesture Lab | Open hand = jump")
++    pygame.display.set_caption(
++        "Fontys Gesture Lab | " + ("Thumb up" if args.gesture == "thumb" else "Open hand") + " = jump"
++    )
+     screen = pygame.display.set_mode((WIDTH, HEIGHT))
+     clock = pygame.time.Clock()
+     font = pygame.font.SysFont("consolas", 20)
+@@ -394,7 +412,11 @@ def main():
+         min_tracking_confidence=0.5,
+     )
+ 
+-    classifier = RuleClassifier()
++    classifier = make_classifier(args.gesture)
++    # The label that triggers a jump, and how the screen texts describe it.
++    trigger = args.gesture
++    jump_hint = "Thumb up = jump" if trigger == "thumb" else "Open hand = jump"
++    rearm_hint = "Lower the thumb (fist) to re-arm." if trigger == "thumb" else "Close hand to re-arm."
+ 
+     # Adaptive-difficulty state
+     config = Config(
+@@ -415,10 +437,16 @@ def main():
+     state = GameState(controller, config, presets=presets, start_preset=args.preset)
+ 
+     # Experiment mode: a planned list of obstacles instead of adaptive difficulty.
+-    experiment_mode = args.experiment
++    experiment_mode = args.experiment or args.progressive
+     experiment_rng = random.Random(args.experiment_seed)
+ 
+     def new_plan():
++        if args.progressive:
++            return ProgressivePlan(
++                config, experiment_rng, speed0=args.experiment_speed,
++                speed_step=args.speed_step, levels=args.levels,
++                per_level=args.per_level, target_rate=args.target_success_rate,
++            )
+         return ExperimentPlan(make_trials(
+             config, experiment_rng,
+             speed=args.experiment_speed, blocks=args.experiment_blocks,
+@@ -478,6 +506,8 @@ def main():
+                 "experiment": int(experiment_mode),
+                 "experiment_speed": args.experiment_speed if experiment_mode else "",
+                 "experiment_seed": args.experiment_seed if experiment_mode else "",
++                "gesture": args.gesture,
++                "progressive": int(args.progressive),
+             },
+         )
+         trials_writer = csv.writer(trials_log)
+@@ -552,6 +582,8 @@ def main():
+                 ob, outcome, state.play_time,
+                 player=args.player, session=state.tracker.current,
+             )
++            if row is not None and hasattr(plan, "report"):
++                plan.report(int(row["trial"]), outcome)    # progressive plan learns from it
+             if row is not None and trials_writer is not None:
+                 trials_writer.writerow(row_values(row))
+                 trials_log.flush()
+@@ -651,7 +683,7 @@ def main():
+             )
+ 
+         open_event = False
+-        if state.phase == Phase.PLAYING and detected == "open" and score >= state.threshold:
++        if state.phase == Phase.PLAYING and detected == trigger and score >= state.threshold:
+             if state.stable_count == 0:
+                 first_open_time = time.perf_counter()
+             state.stable_count += 1
+@@ -674,7 +706,8 @@ def main():
+                     # Remember WHEN this jump happened relative to the next obstacle.
+                     recorder.note_jump(
+                         args.experiment_speed if experiment_mode
+-                        else difficulty_profile(controller.d, config).speed
++                        else difficulty_profile(controller.d, config).speed,
++                        per_obstacle=args.progressive,
+                     )
+             else:
+                 rejected_jumps += 1
+@@ -747,6 +780,7 @@ def main():
+                     controller,
+                     config,
+                     on_outcome=on_outcome,
++                    per_obstacle_speed=args.progressive,
+                 )
+ 
+                 if max_crashes > 0 and controller.failures >= max_crashes:
+@@ -797,7 +831,11 @@ def main():
+         pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
+ 
+         if experiment_mode:
+-            draw_text(f"Experiment: obstacle {plan.spawned}/{plan.total}", 525, 25)
++            draw_text(
++                f"Experiment: obstacle {plan.spawned}/{plan.total}"
++                + (f"   speed {plan.current_speed:.0f}" if args.progressive else ""),
++                525, 25,
++            )
+         else:
+             draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
+         pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
+@@ -827,7 +865,7 @@ def main():
+             pygame.draw.rect(screen, color, rect, border_radius=5)
+ 
+         draw_text(f"Cleared: {controller.successes}  Crashed: {controller.failures}", 24, 410)
+-        draw_text("Open hand = jump. Close hand to re-arm.", 24, 445, use_small=True)
++        draw_text(f"{jump_hint}. {rearm_hint}", 24, 445, use_small=True)
+ 
+         if state.debug_overlay:
+             recent = controller.recent_success_rate()
+@@ -857,7 +895,7 @@ def main():
+                 y += 20
+ 
+         if state.phase == Phase.READY:
+-            _draw_centered_panel(screen, font, small, ["Press SPACE to start", "Open hand = jump"])
++            _draw_centered_panel(screen, font, small, ["Press SPACE to start", jump_hint])
+         elif state.phase == Phase.PAUSED:
+             _draw_centered_panel(screen, font, small, ["Paused", "Press SPACE to resume"])
+         elif state.phase == Phase.OVER:
+diff --git a/gesture_lib.py b/gesture_lib.py
+index 831b662..4aabef0 100644
+--- a/gesture_lib.py
++++ b/gesture_lib.py
+@@ -7,6 +7,7 @@ https://developers.google.com/mediapipe/solutions/vision/gesture_recognizer
+ import numpy as np
+ 
+ GESTURES = ("open", "fist", "custom")
++JUMP_GESTURES = ("open", "thumb")     # which pose triggers a jump (game.py --gesture)
+ 
+ # Friendly names for the 21 landmarks, mainly for teaching and diagrams.
+ LANDMARK_NAMES = [
+@@ -85,3 +86,38 @@ class RuleClassifier:
+         if extended == 0:
+             return "fist", 0.75
+         return "custom", 0.55 + 0.10 * (3 - extended)
++
++
++# A raised thumb must clear the index knuckle by this fraction of the hand size
++# (wrist to middle knuckle).  Lower it if your thumb is not picked up.
++THUMB_RISE_MIN = 0.35
++
++
++class ThumbClassifier(RuleClassifier):
++    """Like RuleClassifier, plus "thumb": a fist with the thumb raised.
++
++    Rest pose is a fist (thumb tucked).  Raising the thumb gives "thumb", so the
++    jump gesture is thumb up, and lowering it re-arms.  Like the finger test this
++    assumes the hand is roughly upright in the image (y grows downward).
++    """
++
++    def classify(self, landmarks):
++        label, score = super().classify(landmarks)
++        if label != "fist":
++            return label, score
++        p = landmarks_to_array(landmarks)
++        hand = float(np.linalg.norm(p[9, :2] - p[0, :2]))      # wrist to middle knuckle
++        if hand < 1e-6:
++            return label, score
++        rise = (p[5, 1] - p[4, 1]) / hand        # thumb tip above the index knuckle
++        above_ip = (p[3, 1] - p[4, 1]) / hand    # and above its own joint: pointing up
++        if rise > THUMB_RISE_MIN and above_ip > 0.05:
++            return "thumb", float(min(0.99, 0.60 + (rise - THUMB_RISE_MIN)))
++        return label, score
++
++
++def make_classifier(gesture: str = "open"):
++    """The classifier for a jump gesture: "open" (open hand) or "thumb" (thumb up)."""
++    if gesture not in JUMP_GESTURES:
++        raise ValueError(f"gesture must be one of {JUMP_GESTURES}, got {gesture!r}")
++    return ThumbClassifier() if gesture == "thumb" else RuleClassifier()
+diff --git a/progressive.py b/progressive.py
+new file mode 100644
+index 0000000..f168d9a
+--- /dev/null
++++ b/progressive.py
+@@ -0,0 +1,110 @@
++"""A progressive session: a ladder of speeds, and on each rung a staircase that
++homes in on the narrowest safe window the player can handle.
++
++Why: the fixed experiment list measures the player; this plan *plays* the player.
++It keeps pushing toward the edge of what is feasible for them, and then raises the
++speed.  It is deliberately not a rigid pattern:
++
++* ``track`` obstacles follow the staircase (window shrinks after a clear, grows
++  faster after a crash, so it settles where the player clears ``target_rate``).
++* ``relief`` obstacles are easy (twice the current window) and come at random, and
++  always after two crashes in a row, so a bad patch never snowballs.
++* ``stretch`` obstacles are harder (0.7 x the current window) at random.
++Only ``track`` obstacles move the staircase.  All windows are feasible by construction
++(the height comes from the physics, see ``jump_service.height_for_window``).
++
++Same interface as ``experiment.ExperimentPlan`` (``total``, ``spawned``, ``exhausted``,
++``take_next``) plus ``report(index, cleared)``, which the game calls for every outcome.
++Pure logic: no pygame, no camera.
++"""
++from __future__ import annotations
++
++import math
++import random
++from typing import Optional
++
++import jump_service as js
++from adaptive import Config
++from experiment import Trial, game_physics
++
++W_MIN, W_MAX = 0.05, 0.45     # seconds: 50 ms is hard but feasible, 450 ms is easy
++STEP_DOWN = 0.07              # log-step after a clear (window shrinks about 7 %)
++P_RELIEF, P_STRETCH = 0.20, 0.10
++
++
++class ProgressivePlan:
++    """Hands out obstacles one at a time, adapting to the player's outcomes."""
++
++    def __init__(
++        self, cfg: Config, rng: random.Random, speed0: float = 400.0,
++        speed_step: float = 60.0, levels: int = 3, per_level: int = 10,
++        warmup: int = 3, target_rate: float = 0.75, width: float = 30.0,
++        start_w: float = 0.32, interval_range: tuple[float, float] = (1.8, 2.6),
++    ):
++        self.cfg, self.rng = cfg, rng
++        self.speed0, self.speed_step = speed0, speed_step
++        self.levels, self.per_level, self.warmup = levels, per_level, warmup
++        self.width, self.interval_range = width, interval_range
++        # Weighted up/down staircase: it settles where  p * down = (1 - p) * up.
++        self.step_up = STEP_DOWN * target_rate / (1.0 - target_rate)
++        self.w = start_w                 # current threshold estimate (s)
++        self._next = 0
++        self._kinds: dict[int, str] = {}
++        self._recent: list[bool] = []    # last outcomes, newest last
++        self._physics = game_physics(cfg)
++
++    # --- the same small interface as ExperimentPlan -------------------------
++    @property
++    def total(self) -> int:
++        return self.warmup + self.levels * self.per_level
++
++    @property
++    def spawned(self) -> int:
++        return self._next
++
++    @property
++    def exhausted(self) -> bool:
++        return self._next >= self.total
++
++    def speed_for(self, index: int) -> float:
++        level = max(0, index - self.warmup) // self.per_level
++        return self.speed0 + min(level, self.levels - 1) * self.speed_step
++
++    @property
++    def current_speed(self) -> float:
++        return self.speed_for(max(self._next - 1, 0))
++
++    # --- choosing the next obstacle -----------------------------------------
++    def _pick(self, index: int) -> tuple[str, float]:
++        if index < self.warmup:
++            return "warm", W_MAX
++        u = self.rng.random()
++        if self._recent[-2:] == [False, False] or u < P_RELIEF:
++            return "relief", min(W_MAX, 2.0 * self.w)
++        if u < P_RELIEF + P_STRETCH:
++            return "stretch", max(W_MIN, 0.7 * self.w)
++        return "track", self.w * math.exp(self.rng.uniform(-0.08, 0.08))
++
++    def take_next(self) -> Optional[Trial]:
++        if self.exhausted:
++            return None
++        i = self._next
++        kind, w = self._pick(i)
++        w = min(W_MAX, max(W_MIN, w))
++        self._kinds[i] = kind
++        self._next += 1
++        speed = self.speed_for(i)
++        height = js.height_for_window(w, self.width, speed, self._physics)
++        last = self.exhausted
++        interval = None if last else self.rng.uniform(*self.interval_range)
++        gap = None if last else speed * interval - self.width
++        return Trial(index=i, target_w=w, height=height, width=self.width,
++                     speed=speed, interval_after=interval, gap_after_px=gap)
++
++    # --- learning from outcomes ---------------------------------------------
++    def report(self, index: int, cleared) -> None:
++        cleared = bool(cleared)
++        self._recent.append(cleared)
++        if self._kinds.get(index) == "track":
++            step = -STEP_DOWN if cleared else self.step_up
++            self.w = min(W_MAX, max(W_MIN, self.w * math.exp(step)))
+diff --git a/report_html.py b/report_html.py
+new file mode 100644
+index 0000000..9576ff9
+--- /dev/null
++++ b/report_html.py
+@@ -0,0 +1,327 @@
++#!/usr/bin/env python3
++"""One self-contained HTML page about a player's jump timing.
++
++    python report_html.py data/alice_run1.csv --out report.html
++    python analyze_trials.py data/alice_run1.csv --html report.html   # same thing
++
++The text report (``analyze_trials.py``) stays the place for quick numbers.  This
++page adds pictures and one extra model that only lives here: **drift**.
++
++Drift = does the player's bias change during the session (warm-up, tiredness)?
++We use a Kalman-style "local level" model:
++
++    bias_t  = bias_(t-1) + w      w ~ N(0, q^2)     (the bias may wander a little)
++    delta_t = bias_t + e          e ~ N(0, r^2)     (each jump is the bias plus noise)
++
++q and r are chosen by maximum likelihood on a small grid.  q = 0 means "no drift".
++Plain Python, no extra packages, so every step can be read.
++"""
++from __future__ import annotations
++
++import argparse
++import html
++import math
++import statistics
++import sys
++from typing import Optional, Sequence
++
++from analyze_trials import _flag, _num, load_trials
++
++# ---------------------------------------------------------------------------
++# Small maths helpers (milliseconds everywhere in this file)
++# ---------------------------------------------------------------------------
++
++
++def _phi(x: float) -> float:
++    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
++
++
++def p_clear(window_ms: float, mu: float, sigma: float) -> float:
++    """Chance a Gaussian jump (bias mu, spread sigma) lands inside a window."""
++    h = window_ms / 2.0
++    return _phi((h - mu) / sigma) - _phi((-h - mu) / sigma)
++
++
++def window_for_rate(rate: float, mu: float, sigma: float) -> float:
++    """Smallest window (ms) that gives ``rate`` success, by bisection."""
++    lo, hi = 0.0, 2000.0
++    for _ in range(50):
++        mid = (lo + hi) / 2.0
++        lo, hi = (mid, hi) if p_clear(mid, mu, sigma) < rate else (lo, mid)
++    return hi
++
++
++def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
++    if n == 0:
++        return 0.0, 1.0
++    p = k / n
++    d = 1 + z * z / n
++    c = (p + z * z / (2 * n)) / d
++    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
++    return max(0.0, c - h), min(1.0, c + h)
++
++
++# ---------------------------------------------------------------------------
++# Drift: Kalman filter + smoother for a slowly moving bias
++# ---------------------------------------------------------------------------
++
++
++def _kalman(y: Sequence[float], q: float, r: float):
++    """Filter y (ms). Returns (loglik, filtered m, P, predicted m, P)."""
++    m, p = 0.0, 100.0 ** 2           # diffuse start
++    ll = 0.0
++    mf, pf, mp, pp = [], [], [], []
++    for i, obs in enumerate(y):
++        m_pred, p_pred = m, p + (q * q if i else 0.0)
++        f = p_pred + r * r
++        v = obs - m_pred
++        ll += -0.5 * (math.log(2 * math.pi * f) + v * v / f)
++        k = p_pred / f
++        m, p = m_pred + k * v, (1 - k) * p_pred
++        mf.append(m); pf.append(p); mp.append(m_pred); pp.append(p_pred)
++    return ll, mf, pf, mp, pp
++
++
++def fit_drift(y: Sequence[float]) -> dict:
++    """Pick q (drift per jump) and r (jump noise) by likelihood; smooth the path."""
++    q_grid = [0, 1, 2, 3, 5, 8, 12, 20]
++    r_grid = [x for x in range(15, 160, 5)]
++    best = {}
++    for q in q_grid:
++        ll, r = max((_kalman(y, q, r)[0], r) for r in r_grid)
++        best[q] = (ll, r)
++    q_hat = max(best, key=lambda q: best[q][0])
++    ll_hat, r_hat = best[q_hat]
++    _, mf, pf, mp, pp = _kalman(y, q_hat, r_hat)
++    ms, ps = mf[:], pf[:]            # Rauch-Tung-Striebel smoother
++    for t in range(len(y) - 2, -1, -1):
++        j = pf[t] / pp[t + 1] if pp[t + 1] > 0 else 0.0
++        ms[t] = mf[t] + j * (ms[t + 1] - mp[t + 1])
++        ps[t] = pf[t] + j * j * (ps[t + 1] - pp[t + 1])
++    gain = 2.0 * (ll_hat - best[0][0])       # likelihood-ratio statistic vs "no drift"
++    return {"q": q_hat, "r": r_hat, "mean": ms, "sd": [math.sqrt(max(v, 0)) for v in ps],
++            "lr": gain, "drifting": gain > 4.0}
++
++
++# ---------------------------------------------------------------------------
++# Tiny SVG helpers
++# ---------------------------------------------------------------------------
++
++W, H, ML, MR, MT, MB = 720, 300, 52, 14, 16, 36
++
++
++class Axes:
++    def __init__(self, x0, x1, y0, y1):
++        self.x0, self.x1, self.y0, self.y1 = x0, x1, y0, y1
++        self.parts: list[str] = []
++
++    def X(self, x):
++        return ML + (x - self.x0) / (self.x1 - self.x0 or 1) * (W - ML - MR)
++
++    def Y(self, y):
++        return H - MB - (y - self.y0) / (self.y1 - self.y0 or 1) * (H - MT - MB)
++
++    def add(self, s):
++        self.parts.append(s)
++
++    def grid(self, yticks, xticks, xlabel, ylabel):
++        for v in yticks:
++            self.add(f'<line class="g" x1="{ML}" x2="{W - MR}" y1="{self.Y(v):.1f}" y2="{self.Y(v):.1f}"/>'
++                     f'<text class="t" x="{ML - 6}" y="{self.Y(v) + 4:.1f}" text-anchor="end">{v:g}</text>')
++        for v in xticks:
++            self.add(f'<text class="t" x="{self.X(v):.1f}" y="{H - MB + 16}" text-anchor="middle">{v:g}</text>')
++        self.add(f'<text class="t" x="{(ML + W - MR) / 2}" y="{H - 4}" text-anchor="middle">{html.escape(xlabel)}</text>')
++        self.add(f'<text class="t" transform="rotate(-90 12 {H / 2})" x="12" y="{H / 2}" text-anchor="middle">{html.escape(ylabel)}</text>')
++
++    def svg(self):
++        return f'<svg viewBox="0 0 {W} {H}" role="img">' + "".join(self.parts) + "</svg>"
++
++
++def _ticks(lo, hi, n=5):
++    step = (hi - lo) / n
++    mag = 10 ** math.floor(math.log10(step)) if step > 0 else 1
++    step = min((s * mag for s in (1, 2, 5, 10) if s * mag >= step), default=step)
++    start = math.ceil(lo / step) * step
++    out, v = [], start
++    while v <= hi + 1e-9:
++        out.append(round(v, 6)); v += step
++    return out
++
++
++def chart_timeline(jumps, drift) -> str:
++    """Every jump against its own safe window, plus the drifting bias."""
++    lim = max(150.0, max(abs(j["delta"]) for j in jumps) * 1.1,
++              max(j["W"] / 2 for j in jumps) * 1.05)
++    a = Axes(1, max(len(jumps), 2), -lim, lim)
++    a.grid(_ticks(-lim, lim), [x for x in _ticks(1, len(jumps), 6) if x >= 1], "jump number", "ms from window centre (early < 0 < late)")
++    a.add(f'<line class="z" x1="{ML}" x2="{W - MR}" y1="{a.Y(0):.1f}" y2="{a.Y(0):.1f}"/>')
++    for i, j in enumerate(jumps, 1):         # safe window of each obstacle
++        a.add(f'<line class="win" x1="{a.X(i):.1f}" x2="{a.X(i):.1f}" y1="{a.Y(-j["W"] / 2):.1f}" y2="{a.Y(j["W"] / 2):.1f}"/>')
++    if drift:                                 # drift band and line
++        up = [(a.X(i), a.Y(m + s)) for i, (m, s) in enumerate(zip(drift["mean"], drift["sd"]), 1)]
++        dn = [(a.X(i), a.Y(m - s)) for i, (m, s) in enumerate(zip(drift["mean"], drift["sd"]), 1)]
++        pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in up + dn[::-1])
++        a.add(f'<polygon class="band" points="{pts}"/>')
++        line = " ".join(f"{a.X(i):.1f},{a.Y(m):.1f}" for i, m in enumerate(drift["mean"], 1))
++        a.add(f'<polyline class="trend" points="{line}"/>')
++    for i, j in enumerate(jumps, 1):
++        cls = "ok" if j["ok"] else "bad"
++        a.add(f'<circle class="{cls}" cx="{a.X(i):.1f}" cy="{a.Y(j["delta"]):.1f}" r="4.5"><title>jump {i}: {j["delta"]:.0f} ms, window {j["W"]:.0f} ms</title></circle>')
++    return a.svg()
++
++
++def chart_success(rows, mu, sigma) -> str:
++    """Observed success by window width (Wilson ranges) against the model curve."""
++    rows = sorted(rows, key=lambda r: r["W"])
++    k = max(3, min(7, len(rows) // 4))
++    groups = [rows[i * len(rows) // k:(i + 1) * len(rows) // k] for i in range(k)]
++    groups = [g for g in groups if g]
++    xmax = max(r["W"] for r in rows) * 1.05
++    a = Axes(0, xmax, 0, 1)
++    a.grid([0, .25, .5, .75, 1], _ticks(0, xmax, 5), "safe window width (ms)", "chance of clearing")
++    if sigma and sigma == sigma:
++        pts = " ".join(f"{a.X(w):.1f},{a.Y(p_clear(w, mu, sigma)):.1f}" for w in [xmax * i / 60 for i in range(61)])
++        a.add(f'<polyline class="trend" points="{pts}"/>')
++    for g in groups:
++        n, kk = len(g), sum(r["ok"] for r in g)
++        w = statistics.fmean(r["W"] for r in g)
++        lo, hi = wilson(kk, n)
++        a.add(f'<line class="win" x1="{a.X(w):.1f}" x2="{a.X(w):.1f}" y1="{a.Y(lo):.1f}" y2="{a.Y(hi):.1f}"/>'
++              f'<circle class="ok" cx="{a.X(w):.1f}" cy="{a.Y(kk / n):.1f}" r="5"><title>{kk}/{n} cleared, window about {w:.0f} ms</title></circle>')
++    return a.svg()
++
++
++def chart_hist(deltas, mu, sigma) -> str:
++    lim = max(200.0, max(abs(d) for d in deltas) * 1.1)
++    bins = 12
++    width = 2 * lim / bins
++    counts = [0] * bins
++    for d in deltas:
++        counts[min(bins - 1, int((d + lim) / width))] += 1
++    a = Axes(-lim, lim, 0, max(counts) + 1)
++    a.grid(_ticks(0, max(counts) + 1, 4), _ticks(-lim, lim), "ms from window centre", "jumps")
++    for i, c in enumerate(counts):
++        x0, x1 = -lim + i * width, -lim + (i + 1) * width
++        a.add(f'<rect class="bar" x="{a.X(x0) + 1:.1f}" y="{a.Y(c):.1f}" width="{a.X(x1) - a.X(x0) - 2:.1f}" height="{a.Y(0) - a.Y(c):.1f}"/>')
++    if sigma and sigma == sigma:
++        pts = " ".join(f"{a.X(x):.1f},{a.Y(len(deltas) * width * math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * math.sqrt(2 * math.pi))):.1f}"
++                       for x in [-lim + 2 * lim * i / 80 for i in range(81)])
++        a.add(f'<polyline class="trend" points="{pts}"/>')
++    return a.svg()
++
++
++# ---------------------------------------------------------------------------
++# Build the page
++# ---------------------------------------------------------------------------
++
++CSS = """
++:root{--bg:#fff;--fg:#1d1d1f;--mut:#6b7280;--card:#f5f5f7;--ok:#2e9e5b;--bad:#d64545;--acc:#3b6fd4;--grid:#e3e3e8}
++@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#ececf0;--mut:#9aa0ab;--card:#222226;--grid:#33343a;--acc:#7da2f0}}
++body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
++main{max-width:780px;margin:0 auto;padding:24px 16px 60px}
++h1{font-size:1.6rem;margin:.2em 0}h2{font-size:1.15rem;margin:1.8em 0 .3em}
++.mut{color:var(--mut)}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0}
++.card{background:var(--card);border-radius:10px;padding:12px 14px}.card b{display:block;font-size:1.5rem}
++svg{width:100%;height:auto;background:var(--card);border-radius:10px}
++.g{stroke:var(--grid)}.z{stroke:var(--mut);stroke-dasharray:4 3}.t{fill:var(--mut);font-size:11px}
++.win{stroke:var(--acc);stroke-opacity:.35;stroke-width:5;stroke-linecap:round}.ok{fill:var(--ok)}.bad{fill:var(--bad)}
++.trend{fill:none;stroke:var(--acc);stroke-width:2.2}.band{fill:var(--acc);fill-opacity:.15}.bar{fill:var(--acc);fill-opacity:.55}
++table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right}th:first-child,td:first-child{text-align:left}
++"""
++
++
++def _jumps(rows):
++    out = []
++    for r in rows:
++        d, w = _num(r, "delta"), _num(r, "W")
++        if d is not None and w is not None:
++            out.append({"delta": d * 1000, "W": w * 1000, "ok": _flag(r, "outcome"),
++                        "speed": _num(r, "speed") or 0.0})
++    return out
++
++
++def build_html(rows: Sequence[dict]) -> str:
++    jumps = _jumps(rows)
++    feasible = [r for r in rows if _num(r, "W") is not None]
++    all_ws = [{"W": _num(r, "W") * 1000, "ok": _flag(r, "outcome")} for r in feasible]
++    n_ok = sum(_flag(r, "outcome") for r in rows)
++    who = ", ".join(sorted({r.get("player", "") for r in rows if r.get("player")})) or "player"
++    parts = [f"<h1>Jump timing report: {html.escape(who)}</h1>",
++             f'<p class="mut">{len(rows)} obstacles, {len(jumps)} jumps measured, from {html.escape(", ".join(sorted({r["_source"] for r in rows})))}.</p>']
++    if len(jumps) < 8:
++        parts.append("<p>Fewer than 8 measured jumps: play a longer session before reading anything into the numbers.</p>")
++        return _page("".join(parts))
++
++    deltas = [j["delta"] for j in jumps]
++    mu, sigma = statistics.fmean(deltas), statistics.stdev(deltas)
++    se_mu, se_sig = sigma / math.sqrt(len(deltas)), sigma / math.sqrt(2 * len(deltas))
++    pc = sum(1 for r in feasible if _flag(r, "predicted_success") == _flag(r, "outcome") and _num(r, "t_j") is not None)
++    pj = sum(1 for r in feasible if _num(r, "t_j") is not None)
++    drift = fit_drift(deltas)
++
++    parts.append('<div class="cards">'
++                 f'<div class="card">cleared<b>{n_ok}/{len(rows)}</b>{100 * n_ok / len(rows):.0f}%</div>'
++                 f'<div class="card">bias<b>{mu:+.0f} ms</b>±{se_mu:.0f} ({"early" if mu < 0 else "late"})</div>'
++                 f'<div class="card">spread<b>{sigma:.0f} ms</b>±{se_sig:.0f}</div>'
++                 f'<div class="card">physics check<b>{pc}/{pj}</b>outcomes predicted</div></div>')
++    tip = ("Wait a beat before opening your hand." if mu < -15 else
++           "Open your hand a little sooner." if mu > 15 else "Your timing is well centred on average.")
++    parts.append(f"<p>On average your jumps land <b>{abs(mu):.0f} ms {'early' if mu < 0 else 'late'}</b> relative to the middle "
++                 f"of the safe window, and about two out of three land within <b>{sigma:.0f} ms</b> of your own average. {tip}</p>")
++
++    parts.append("<h2>Every jump against its safe window</h2>"
++                 '<p class="mut">Each pale bar is one obstacle\'s safe window; the dot is where you jumped (green cleared, red crashed). '
++                 "The line is the drift estimate described below.</p>" + chart_timeline(jumps, drift))
++    verdict = ("The model finds <b>some drift</b>: your bias moved during the session (warming up or getting tired)."
++               if drift["drifting"] else
++               "The model finds <b>no clear drift</b>: a flat bias explains the session about as well as a moving one.")
++    parts.append("<h2>Drift (does your bias change during the session?)</h2>"
++                 f"<p>{verdict} Fitted wander: {drift['q']:.0f} ms per jump; jump noise {drift['r']:.0f} ms; "
++                 f"likelihood gain over a flat bias {drift['lr']:.1f} (about 4 or more suggests real drift). "
++                 "With about 30 jumps the shaded band is wide, so only a large, steady move would show.</p>")
++    parts.append("<h2>Chance of clearing by window width</h2>"
++                 '<p class="mut">Dots: what happened, with 95% ranges. Line: what a bell curve with your bias and spread predicts.</p>'
++                 + chart_success(all_ws, mu, sigma))
++    parts.append("<h2>Where your jumps landed</h2>"
++                 '<p class="mut">Bars: your jumps. Line: the bell curve fitted to them.</p>' + chart_hist(deltas, mu, sigma))
++
++    speeds = sorted({round(j["speed"]) for j in jumps if j["speed"]})
++    if len(speeds) > 1:
++        body = ""
++        for s in speeds:
++            ds = [j["delta"] for j in jumps if round(j["speed"]) == s]
++            if len(ds) >= 4:
++                m, sd = statistics.fmean(ds), statistics.stdev(ds)
++                body += (f"<tr><td>{s} px/s</td><td>{len(ds)}</td><td>{m:+.0f}</td><td>{sd:.0f}</td>"
++                         f"<td>{window_for_rate(0.7, m, sd):.0f}</td></tr>")
++        parts.append("<h2>By speed</h2><table><tr><th>speed</th><th>jumps</th><th>bias (ms)</th><th>spread (ms)</th>"
++                     "<th>window for 70% (ms)</th></tr>" + body + "</table>"
++                     '<p class="mut">The last column is the narrowest safe window you would clear 70% of the time at that speed.</p>')
++    parts.append('<p class="mut">Bias includes camera and detection delay, so it describes this player on this setup. '
++                 "Numbers after ± are one standard error.</p>")
++    return _page("".join(parts))
++
++
++def _page(body: str) -> str:
++    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
++            f'<meta name="viewport" content="width=device-width,initial-scale=1"><title>Jump timing report</title>'
++            f"<style>{CSS}</style></head><body><main>{body}</main></body></html>")
++
++
++def main(argv: Optional[Sequence[str]] = None) -> int:
++    ap = argparse.ArgumentParser(description="Write a self-contained HTML timing report.")
++    ap.add_argument("files", nargs="+", help="trial CSV file(s)")
++    ap.add_argument("--out", default="report.html", help="output HTML path")
++    args = ap.parse_args(argv)
++    rows = load_trials(args.files)
++    if not rows:
++        print("No trials found.")
++        return 1
++    with open(args.out, "w", encoding="utf-8") as f:
++        f.write(build_html(rows))
++    print(f"HTML report saved to {args.out}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/test_gesture_lib.py b/tests/test_gesture_lib.py
+index 7dfa83a..2dec3f0 100644
+--- a/tests/test_gesture_lib.py
++++ b/tests/test_gesture_lib.py
+@@ -124,3 +124,45 @@ def test_importing_opencv_and_pygame_together_does_not_crash():
+     pytest.importorskip("pygame")
+     import cv2  # noqa: F401
+     import pygame  # noqa: F401
++
++
++# --- thumb-up gesture ---------------------------------------------------------
++
++def _hand(fingers_up, thumb):
++    """A plausible upright hand (image y grows downward).  thumb: up | tucked | side."""
++    p = np.zeros((21, 3), dtype=np.float32)
++    p[0, :2] = [0.50, 0.80]                               # wrist
++    for (mcp, pip, tip), x in zip([(5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20)],
++                                  [0.45, 0.50, 0.55, 0.60]):
++        p[mcp, :2] = [x, 0.57 if mcp == 5 else 0.55]
++        p[pip, :2] = [x, 0.50]
++        p[tip, :2] = [x, 0.35] if fingers_up else [x, 0.56]
++    p[1, :2], p[2, :2], p[3, :2] = [0.43, 0.75], [0.40, 0.68], [0.38, 0.64]
++    p[4, :2] = {"up": [0.37, 0.45], "tucked": [0.44, 0.58], "side": [0.25, 0.62]}[thumb]
++    return p
++
++
++def test_thumb_classifier_detects_thumb_up_from_fist():
++    from gesture_lib import ThumbClassifier
++    label, score = ThumbClassifier().classify(_hand(False, "up"))
++    assert label == "thumb" and 0.6 <= score <= 0.99
++
++
++def test_thumb_classifier_keeps_fist_and_other_poses():
++    from gesture_lib import ThumbClassifier
++    c = ThumbClassifier()
++    assert c.classify(_hand(False, "tucked"))[0] == "fist"
++    assert c.classify(_hand(False, "side"))[0] == "fist"      # thumb out sideways is not thumb up
++    assert c.classify(_hand(True, "up"))[0] == "open"         # an open hand never counts as thumb
++
++
++def test_rule_classifier_never_returns_thumb():
++    assert RuleClassifier().classify(_hand(False, "up"))[0] == "fist"
++
++
++def test_make_classifier_selects_by_name_and_rejects_unknown():
++    from gesture_lib import ThumbClassifier, make_classifier
++    assert type(make_classifier("open")) is RuleClassifier
++    assert isinstance(make_classifier("thumb"), ThumbClassifier)
++    with pytest.raises(ValueError):
++        make_classifier("wave")
+diff --git a/tests/test_progressive.py b/tests/test_progressive.py
+new file mode 100644
+index 0000000..30d5322
+--- /dev/null
++++ b/tests/test_progressive.py
+@@ -0,0 +1,90 @@
++"""Tests for the progressive plan (speed ladder + staircase).  Pure logic."""
++import random
++
++from adaptive import Config
++from experiment import game_window
++from progressive import W_MAX, W_MIN, ProgressivePlan
++
++
++def _plan(seed=1, **kw):
++    return ProgressivePlan(Config(), random.Random(seed), **kw)
++
++
++def _drain(plan, cleared_fn=lambda t: True):
++    trials = []
++    while (t := plan.take_next()) is not None:
++        trials.append(t)
++        plan.report(t.index, cleared_fn(t))
++    return trials
++
++
++def test_plan_has_expected_length_and_ends():
++    plan = _plan()
++    trials = _drain(plan)
++    assert len(trials) == plan.total == 3 + 3 * 10 and plan.exhausted
++    assert trials[-1].interval_after is None and trials[-1].gap_after_px is None
++    assert all(t.interval_after is not None for t in trials[:-1])
++
++
++def test_every_obstacle_is_feasible_and_within_window_limits():
++    cfg = Config()
++    for seed in range(20):
++        for fn in (lambda t: True, lambda t: False, lambda t: t.index % 3 == 0):
++            for t in _drain(_plan(seed), fn):
++                assert W_MIN - 1e-9 <= t.target_w <= W_MAX + 1e-9
++                w = game_window(t.height, t.width, t.speed, t.gap_after_px, cfg)
++                assert w.feasible and w.width > 0.04          # a real, if narrow, safe window
++
++
++def test_speed_rises_by_level_and_warmup_is_slow_and_easy():
++    trials = _drain(_plan(speed0=400, speed_step=60, levels=3, per_level=10))
++    assert [t.speed for t in trials[:13]] == [400.0] * 13          # warm-up + first level
++    assert trials[13].speed == 460.0 and trials[-1].speed == 520.0
++    assert all(t.target_w == W_MAX for t in trials[:3])
++
++
++def test_staircase_shrinks_after_clears_and_grows_after_crashes():
++    plan = _plan(seed=3)
++    for _ in range(3):
++        t = plan.take_next(); plan.report(t.index, True)           # warm-up
++    start = plan.w
++    plan._kinds[99] = "track"
++    plan.report(99, True)
++    assert plan.w < start
++    low = plan.w
++    plan.report(99, False)
++    assert plan.w > low and plan.step_up > 0.07                    # up-step bigger than down-step
++
++
++def test_relief_after_two_crashes_and_only_track_moves_staircase():
++    plan = _plan(seed=5)
++    for _ in range(3):
++        t = plan.take_next(); plan.report(t.index, True)
++    plan.report(100, False); plan.report(101, False)
++    t = plan.take_next()
++    assert plan._kinds[t.index] == "relief" and t.target_w >= min(W_MAX, 1.99 * plan.w)
++    before = plan.w
++    plan.report(t.index, False)                                    # a relief crash must not change it
++    assert plan.w == before
++
++
++def test_staircase_settles_near_the_players_threshold():
++    """A simulated player (bias 0, spread 60 ms): the track windows should hover
++    near the width that player clears about 75% of the time (about 126 ms)."""
++    from math import erf, sqrt
++    phi = lambda x: 0.5 * (1 + erf(x / sqrt(2)))
++    rng = random.Random(0)
++    ws = []
++    for seed in range(40):
++        plan = _plan(seed, levels=3, per_level=40, start_w=0.32)
++        for t in _drain(plan, lambda t: rng.random() < 2 * phi(t.target_w / 2 / 0.06) - 1):
++            if plan._kinds[t.index] == "track" and t.index > 40:
++                ws.append(t.target_w)
++    mean_w = sum(ws) / len(ws)
++    assert 0.09 < mean_w < 0.17
++
++
++def test_plans_with_same_seed_repeat_and_different_seeds_differ():
++    a, b, c = (_drain(_plan(s)) for s in (1, 1, 2))
++    assert [t.target_w for t in a] == [t.target_w for t in b]
++    assert [t.target_w for t in a] != [t.target_w for t in c]
+diff --git a/tests/test_report_html.py b/tests/test_report_html.py
+new file mode 100644
+index 0000000..0f2dea6
+--- /dev/null
++++ b/tests/test_report_html.py
+@@ -0,0 +1,59 @@
++"""Tests for the HTML report: the maths helpers, the drift model, and the page."""
++import random
++
++from report_html import build_html, fit_drift, p_clear, window_for_rate, wilson
++
++
++def _rows(n=24, speeds=(400.0,), seed=1, bias=-20.0, sigma=50.0):
++    rng = random.Random(seed)
++    rows = []
++    for i in range(n):
++        w = rng.choice([0.45, 0.24, 0.13, 0.09])
++        delta = rng.gauss(bias, sigma) / 1000.0
++        ok = abs(delta) <= w / 2
++        rows.append({"player": "p", "_source": "t.csv", "trial": str(i), "W": str(w),
++                     "delta": str(delta), "t_j": "1", "outcome": str(int(ok)),
++                     "predicted_success": str(int(ok)), "speed": str(speeds[i % len(speeds)])})
++    return rows
++
++
++def test_p_clear_and_window_for_rate_are_inverse():
++    assert abs(p_clear(100000, 0, 50) - 1.0) < 1e-9
++    assert abs(p_clear(0.001, 0, 50)) < 1e-3
++    w = window_for_rate(0.7, -20.0, 60.0)
++    assert abs(p_clear(w, -20.0, 60.0) - 0.7) < 1e-6
++
++
++def test_wilson_range_contains_the_rate_and_is_wide_for_small_n():
++    lo, hi = wilson(3, 4)
++    assert lo < 0.75 < hi and hi - lo > 0.4
++    assert wilson(0, 0) == (0.0, 1.0)
++
++
++def test_drift_model_is_quiet_when_flat_and_notices_a_big_drift():
++    flat = sum(fit_drift([random.Random(s).gauss(-20, 50) for _ in range(30)])["drifting"] for s in range(20))
++    rng = random.Random(0)
++    moving = [rng.gauss(-80 + 160 * i / 29, 30) for i in range(30)]
++    assert flat <= 2
++    assert fit_drift(moving)["drifting"] is True
++
++
++def test_drift_path_has_one_value_per_jump():
++    d = fit_drift([float(x) for x in range(-30, 30, 2)])
++    assert len(d["mean"]) == len(d["sd"]) == 30
++
++
++def test_page_is_selfcontained_and_has_the_sections():
++    page = build_html(_rows())
++    for text in ("Jump timing report", "<svg", "Drift", "Chance of clearing", "Where your jumps landed"):
++        assert text in page
++    assert "http://" not in page.replace("http://www.w3.org", "") and "<script" not in page
++
++
++def test_by_speed_table_only_appears_with_several_speeds():
++    assert "By speed" not in build_html(_rows())
++    assert "By speed" in build_html(_rows(n=40, speeds=(400.0, 460.0)))
++
++
++def test_short_session_gets_a_polite_message_not_a_crash():
++    assert "Fewer than 8" in build_html(_rows(n=5))

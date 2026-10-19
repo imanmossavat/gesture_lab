@@ -12,6 +12,10 @@ Slow-changing reference for the gesture lab. Regenerable numbers live in code, t
 - `experiment.py`: planned obstacle list (`make_trials`), jump-time recorder, `TRIAL_HEADER`.
 - `simulate_experiment.py`: headless simulated player that writes a trial log.
 - `analyze_trials.py`: plain-language report and plot for trial logs. See `EXPERIMENT.md`.
+- `report_html.py`: one-file HTML report (charts + drift model); `analyze_trials.py --html` calls it.
+- `progressive.py`: `ProgressivePlan` (speed ladder + staircase); same interface as `ExperimentPlan` plus `report()`.
+- `gesture_lib.py`: also `ThumbClassifier` / `make_classifier` for `game.py --gesture open|thumb`.
+- `FUTURE.md`: research context and ideas not built yet.
 
 ## Invariants
 - `adaptive.py`, `gesture_lib.py`, `jump_service.py` and `experiment.py` import no pygame, cv2, or mediapipe.

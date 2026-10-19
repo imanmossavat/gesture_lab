@@ -49,7 +49,8 @@ from experiment import (
     row_values,
     trial_to_obstacle,
 )
-from gesture_lib import RuleClassifier
+from gesture_lib import JUMP_GESTURES, make_classifier
+from progressive import ProgressivePlan
 
 WIDTH, HEIGHT = 1180, 720
 CAM_W, CAM_H = 480, 360
@@ -326,6 +327,21 @@ def parse_args():
         help="CSV path for the jump-timing log (one row per obstacle). "
              "Works in experiment mode and in normal adaptive mode.",
     )
+    parser.add_argument(
+        "--gesture", choices=JUMP_GESTURES, default="open",
+        help="Jump gesture: 'open' = open hand (default), 'thumb' = thumb up from a fist.",
+    )
+    parser.add_argument(
+        "--progressive", action="store_true",
+        help="Progressive session: a staircase finds your narrowest feasible window, "
+             "then the speed rises (implies experiment mode; use with --log-trials).",
+    )
+    parser.add_argument("--speed-step", type=float, default=60.0,
+                        help="--progressive: speed increase per level, px/s (default 60)")
+    parser.add_argument("--levels", type=int, default=3,
+                        help="--progressive: number of speed levels (default 3)")
+    parser.add_argument("--per-level", type=int, default=10,
+                        help="--progressive: obstacles per level (default 10)")
     args = parser.parse_args()
     if args.rest_range is not None:
         lo, hi = args.rest_range
@@ -364,7 +380,9 @@ def main():
     args = parse_args()
 
     pygame.init()
-    pygame.display.set_caption("Fontys Gesture Lab | Open hand = jump")
+    pygame.display.set_caption(
+        "Fontys Gesture Lab | " + ("Thumb up" if args.gesture == "thumb" else "Open hand") + " = jump"
+    )
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("consolas", 20)
@@ -394,7 +412,11 @@ def main():
         min_tracking_confidence=0.5,
     )
 
-    classifier = RuleClassifier()
+    classifier = make_classifier(args.gesture)
+    # The label that triggers a jump, and how the screen texts describe it.
+    trigger = args.gesture
+    jump_hint = "Thumb up = jump" if trigger == "thumb" else "Open hand = jump"
+    rearm_hint = "Lower the thumb (fist) to re-arm." if trigger == "thumb" else "Close hand to re-arm."
 
     # Adaptive-difficulty state
     config = Config(
@@ -415,10 +437,16 @@ def main():
     state = GameState(controller, config, presets=presets, start_preset=args.preset)
 
     # Experiment mode: a planned list of obstacles instead of adaptive difficulty.
-    experiment_mode = args.experiment
+    experiment_mode = args.experiment or args.progressive
     experiment_rng = random.Random(args.experiment_seed)
 
     def new_plan():
+        if args.progressive:
+            return ProgressivePlan(
+                config, experiment_rng, speed0=args.experiment_speed,
+                speed_step=args.speed_step, levels=args.levels,
+                per_level=args.per_level, target_rate=args.target_success_rate,
+            )
         return ExperimentPlan(make_trials(
             config, experiment_rng,
             speed=args.experiment_speed, blocks=args.experiment_blocks,
@@ -478,6 +506,8 @@ def main():
                 "experiment": int(experiment_mode),
                 "experiment_speed": args.experiment_speed if experiment_mode else "",
                 "experiment_seed": args.experiment_seed if experiment_mode else "",
+                "gesture": args.gesture,
+                "progressive": int(args.progressive),
             },
         )
         trials_writer = csv.writer(trials_log)
@@ -552,6 +582,8 @@ def main():
                 ob, outcome, state.play_time,
                 player=args.player, session=state.tracker.current,
             )
+            if row is not None and hasattr(plan, "report"):
+                plan.report(int(row["trial"]), outcome)    # progressive plan learns from it
             if row is not None and trials_writer is not None:
                 trials_writer.writerow(row_values(row))
                 trials_log.flush()
@@ -651,7 +683,7 @@ def main():
             )
 
         open_event = False
-        if state.phase == Phase.PLAYING and detected == "open" and score >= state.threshold:
+        if state.phase == Phase.PLAYING and detected == trigger and score >= state.threshold:
             if state.stable_count == 0:
                 first_open_time = time.perf_counter()
             state.stable_count += 1
@@ -674,7 +706,8 @@ def main():
                     # Remember WHEN this jump happened relative to the next obstacle.
                     recorder.note_jump(
                         args.experiment_speed if experiment_mode
-                        else difficulty_profile(controller.d, config).speed
+                        else difficulty_profile(controller.d, config).speed,
+                        per_obstacle=args.progressive,
                     )
             else:
                 rejected_jumps += 1
@@ -747,6 +780,7 @@ def main():
                     controller,
                     config,
                     on_outcome=on_outcome,
+                    per_obstacle_speed=args.progressive,
                 )
 
                 if max_crashes > 0 and controller.failures >= max_crashes:
@@ -797,7 +831,11 @@ def main():
         pygame.draw.rect(screen, (75, 91, 112), (20, 20, CAM_W + 8, CAM_H + 8), 2)
 
         if experiment_mode:
-            draw_text(f"Experiment: obstacle {plan.spawned}/{plan.total}", 525, 25)
+            draw_text(
+                f"Experiment: obstacle {plan.spawned}/{plan.total}"
+                + (f"   speed {plan.current_speed:.0f}" if args.progressive else ""),
+                525, 25,
+            )
         else:
             draw_text(f"Difficulty preset: {state.preset_id} (d={controller.d:.2f})", 525, 25)
         pygame.draw.rect(screen, state.diff_color, (780, 28, 20, 14), border_radius=3)
@@ -827,7 +865,7 @@ def main():
             pygame.draw.rect(screen, color, rect, border_radius=5)
 
         draw_text(f"Cleared: {controller.successes}  Crashed: {controller.failures}", 24, 410)
-        draw_text("Open hand = jump. Close hand to re-arm.", 24, 445, use_small=True)
+        draw_text(f"{jump_hint}. {rearm_hint}", 24, 445, use_small=True)
 
         if state.debug_overlay:
             recent = controller.recent_success_rate()
@@ -857,7 +895,7 @@ def main():
                 y += 20
 
         if state.phase == Phase.READY:
-            _draw_centered_panel(screen, font, small, ["Press SPACE to start", "Open hand = jump"])
+            _draw_centered_panel(screen, font, small, ["Press SPACE to start", jump_hint])
         elif state.phase == Phase.PAUSED:
             _draw_centered_panel(screen, font, small, ["Paused", "Press SPACE to resume"])
         elif state.phase == Phase.OVER:

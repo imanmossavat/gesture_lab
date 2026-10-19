@@ -482,6 +482,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Analyze jump-timing trial logs.")
     parser.add_argument("files", nargs="+", help="trial CSV file(s)")
     parser.add_argument("--plot", metavar="PNG", help="also save the four-panel picture")
+    parser.add_argument("--html", metavar="HTML", help="also save a self-contained HTML report (adds a drift model)")
     args = parser.parse_args(argv)
 
     rows = load_trials(args.files)
@@ -489,6 +490,11 @@ def main(argv=None) -> int:
     if args.plot and rows:
         make_plot(rows, summary, args.plot)
         print(f"Picture saved to {args.plot}")
+    if args.html and rows:
+        from report_html import build_html   # imported here: report_html imports this module
+        with open(args.html, "w", encoding="utf-8") as f:
+            f.write(build_html(rows))
+        print(f"HTML report saved to {args.html}")
     return 0
 
 

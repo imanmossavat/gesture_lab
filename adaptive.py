@@ -508,6 +508,7 @@ def resolve_obstacles(
     controller: AdaptiveController,  # forward declaration handled by annotations
     config: Optional[Config] = None,
     on_outcome: Optional[Callable[[Obstacle, int], None]] = None,
+    per_obstacle_speed: bool = False,
 ) -> list[Obstacle]:
     """Move obstacles, record exactly one outcome per obstacle, and update ``d``.
 
@@ -531,7 +532,8 @@ def resolve_obstacles(
             _record(ob, 0)
 
         # Every obstacle keeps scrolling, even after it is done.
-        ob.x -= speed * dt
+        # per_obstacle_speed: each obstacle keeps the speed it spawned with (speed ladder).
+        ob.x -= (ob.speed_spawn if per_obstacle_speed and ob.speed_spawn > 0 else speed) * dt
 
         # Success once the obstacle has fully passed the player.
         if not ob.done and ob.x + ob.w < player_x:

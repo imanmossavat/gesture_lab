@@ -312,7 +312,7 @@ class TrialRecorder:
         self._live.append(_LiveTrial(obstacle, index, target_w, next_gap_px))
 
     # -- step 2: the player jumps ----------------------------------------
-    def note_jump(self, speed: float) -> Optional[float]:
+    def note_jump(self, speed: float, per_obstacle: bool = False) -> Optional[float]:
         """Remember when this jump happened, for the obstacle it belongs to.
 
         A jump belongs to the nearest obstacle that has NOT yet reached the
@@ -332,6 +332,8 @@ class TrialRecorder:
         if not ahead or speed <= 0.0:
             return None
         nearest = min(ahead, key=lambda lt: lt.obstacle.x)
+        if per_obstacle and nearest.obstacle.speed_spawn > 0:
+            speed = nearest.obstacle.speed_spawn     # speed ladder: use the obstacle's own speed
         t_j = -(nearest.obstacle.x - player_front) / speed
         nearest.t_j = t_j
         return t_j

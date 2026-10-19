@@ -124,3 +124,45 @@ def test_importing_opencv_and_pygame_together_does_not_crash():
     pytest.importorskip("pygame")
     import cv2  # noqa: F401
     import pygame  # noqa: F401
+
+
+# --- thumb-up gesture ---------------------------------------------------------
+
+def _hand(fingers_up, thumb):
+    """A plausible upright hand (image y grows downward).  thumb: up | tucked | side."""
+    p = np.zeros((21, 3), dtype=np.float32)
+    p[0, :2] = [0.50, 0.80]                               # wrist
+    for (mcp, pip, tip), x in zip([(5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20)],
+                                  [0.45, 0.50, 0.55, 0.60]):
+        p[mcp, :2] = [x, 0.57 if mcp == 5 else 0.55]
+        p[pip, :2] = [x, 0.50]
+        p[tip, :2] = [x, 0.35] if fingers_up else [x, 0.56]
+    p[1, :2], p[2, :2], p[3, :2] = [0.43, 0.75], [0.40, 0.68], [0.38, 0.64]
+    p[4, :2] = {"up": [0.37, 0.45], "tucked": [0.44, 0.58], "side": [0.25, 0.62]}[thumb]
+    return p
+
+
+def test_thumb_classifier_detects_thumb_up_from_fist():
+    from gesture_lib import ThumbClassifier
+    label, score = ThumbClassifier().classify(_hand(False, "up"))
+    assert label == "thumb" and 0.6 <= score <= 0.99
+
+
+def test_thumb_classifier_keeps_fist_and_other_poses():
+    from gesture_lib import ThumbClassifier
+    c = ThumbClassifier()
+    assert c.classify(_hand(False, "tucked"))[0] == "fist"
+    assert c.classify(_hand(False, "side"))[0] == "fist"      # thumb out sideways is not thumb up
+    assert c.classify(_hand(True, "up"))[0] == "open"         # an open hand never counts as thumb
+
+
+def test_rule_classifier_never_returns_thumb():
+    assert RuleClassifier().classify(_hand(False, "up"))[0] == "fist"
+
+
+def test_make_classifier_selects_by_name_and_rejects_unknown():
+    from gesture_lib import ThumbClassifier, make_classifier
+    assert type(make_classifier("open")) is RuleClassifier
+    assert isinstance(make_classifier("thumb"), ThumbClassifier)
+    with pytest.raises(ValueError):
+        make_classifier("wave")

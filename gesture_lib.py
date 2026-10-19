@@ -7,6 +7,7 @@ https://developers.google.com/mediapipe/solutions/vision/gesture_recognizer
 import numpy as np
 
 GESTURES = ("open", "fist", "custom")
+JUMP_GESTURES = ("open", "thumb")     # which pose triggers a jump (game.py --gesture)
 
 # Friendly names for the 21 landmarks, mainly for teaching and diagrams.
 LANDMARK_NAMES = [
@@ -85,3 +86,38 @@ class RuleClassifier:
         if extended == 0:
             return "fist", 0.75
         return "custom", 0.55 + 0.10 * (3 - extended)
+
+
+# A raised thumb must clear the index knuckle by this fraction of the hand size
+# (wrist to middle knuckle).  Lower it if your thumb is not picked up.
+THUMB_RISE_MIN = 0.35
+
+
+class ThumbClassifier(RuleClassifier):
+    """Like RuleClassifier, plus "thumb": a fist with the thumb raised.
+
+    Rest pose is a fist (thumb tucked).  Raising the thumb gives "thumb", so the
+    jump gesture is thumb up, and lowering it re-arms.  Like the finger test this
+    assumes the hand is roughly upright in the image (y grows downward).
+    """
+
+    def classify(self, landmarks):
+        label, score = super().classify(landmarks)
+        if label != "fist":
+            return label, score
+        p = landmarks_to_array(landmarks)
+        hand = float(np.linalg.norm(p[9, :2] - p[0, :2]))      # wrist to middle knuckle
+        if hand < 1e-6:
+            return label, score
+        rise = (p[5, 1] - p[4, 1]) / hand        # thumb tip above the index knuckle
+        above_ip = (p[3, 1] - p[4, 1]) / hand    # and above its own joint: pointing up
+        if rise > THUMB_RISE_MIN and above_ip > 0.05:
+            return "thumb", float(min(0.99, 0.60 + (rise - THUMB_RISE_MIN)))
+        return label, score
+
+
+def make_classifier(gesture: str = "open"):
+    """The classifier for a jump gesture: "open" (open hand) or "thumb" (thumb up)."""
+    if gesture not in JUMP_GESTURES:
+        raise ValueError(f"gesture must be one of {JUMP_GESTURES}, got {gesture!r}")
+    return ThumbClassifier() if gesture == "thumb" else RuleClassifier()
