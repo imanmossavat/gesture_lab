@@ -1,6 +1,6 @@
 # Gesture Lab
 
-[![tests](https://github.com/imanmossavat/gesture_lab/actions/workflows/tests.yml/badge.svg)](https://github.com/imanmossavat/gesture_lab/actions/workflows/tests.yml)
+[![tests](https://github.com/imanmossavat/gesture_lab/actions/workflows/tests.yml/badge.svg?branch=package-layout)](https://github.com/imanmossavat/gesture_lab/actions/workflows/tests.yml?query=branch%3Apackage-layout)
 
 A hand-controlled runner that doubles as a small experiment: how precisely can you time a jump with a hand gesture? Play it, then get a report on your own timing. Needs a webcam and Python 3.10 to 3.13.
 
