@@ -1,8 +1,8 @@
 # Gesture Lab
 
-A hand-controlled runner that doubles as a small experiment: how precisely can you time a jump with a hand gesture? Play it, then see a report on your own timing.
+A hand-controlled runner that doubles as a small experiment: how precisely can you time a jump with a hand gesture? Play it, then get a report on your own timing. Needs a webcam and Python 3.10 to 3.13.
 
-## Play in five minutes
+## Quick start
 
 ```bash
 python -m venv .venv
@@ -13,73 +13,74 @@ python game.py
 
 A window opens (it may hide behind other windows). Click it and press **SPACE**.
 
-- **First run needs internet once.** On some installs the hand model (`hand_landmarker.task`) downloads on first use. For offline use, place it at `~/.cache/fontys_gesture_lab/hand_landmarker.task`.
-- **Setup:** sit about an arm's length from the camera, hand fully in view, fingers pointing up, good light.
-- **Jump:** open your hand. **Close it again** before the next jump (that re-arms it).
+- **Setup:** sit about an arm's length from the camera, whole hand in view, fingers up, good light.
+- **Jump:** open your hand, then **close it** before the next jump (that re-arms it).
+- **First run needs internet once** on installs that download the hand model. Offline: put `hand_landmarker.task` in `~/.cache/fontys_gesture_lab/`.
 
-## Pick a mode
+## Modes
 
 | I want to... | Command |
 |---|---|
 | Just play | `python game.py` |
 | Jump with a thumb instead of an open hand | `python game.py --gesture thumb` (thumb up from a fist; lower it to re-arm) |
-| Be measured: a fixed list of 31 obstacles, same for everyone with the same seed | `python game.py --experiment --experiment-seed 42 --player alice --log-trials data/alice_1.csv` |
+| Be measured: a fixed obstacle list, identical for the same seed | `python game.py --experiment --experiment-seed 42 --player alice --log-trials data/alice_1.csv` |
 | A progressive challenge: it finds your narrowest feasible window, then speeds up | `python game.py --progressive --player alice --log-trials data/alice_prog_1.csv` |
 
-A measured or progressive session takes one to two minutes. When "EXPERIMENT COMPLETE" appears, press **Q** to quit.
+A measured or progressive session takes one to two minutes. When "EXPERIMENT COMPLETE" appears, press **Q**. All options: `python game.py --help`.
 
 ## Controls
 
 | Input | Action |
 |---|---|
 | **SPACE** | Start / pause / resume / retry |
-| **Open hand** (or **thumb up** with `--gesture thumb`) | Jump |
-| **D** | Debug overlay (shows the detected gesture, its score, and FPS) |
-| **1 / 2 / 3** | Easy / normal / hard preset (normal mode only) |
+| **Open hand** (**thumb up** with `--gesture thumb`) | Jump |
+| **D** | Debug overlay: detected gesture, score, FPS |
+| **1 / 2 / 3** | Easy / normal / hard preset (sets confidence threshold and stability frames, and restarts the run) |
 | **+ / -** | Raise / lower the confidence threshold |
 | **Q** or **Esc** | Quit |
 
-## See your results
+## Your results
 
 ```bash
-python analyze_trials.py data/alice_1.csv                      # plain-language report in the terminal
-python analyze_trials.py data/alice_1.csv --html report.html   # charts, in your browser
+python analyze_trials.py data/alice_1.csv                      # plain-language report
+python analyze_trials.py data/alice_1.csv --html report.html   # charts, with a drift check
 python analyze_trials.py data/alice_1.csv --plot report.png    # four-panel picture
-python analyze_trials.py data/alice_1.csv data/alice_2.csv     # pool several sessions
+python analyze_trials.py data/alice_1.csv data/alice_2.csv     # pool sessions
 ```
 
-The key numbers are **bias** (do you jump early or late?) and **spread** (how scattered are your jumps?). The HTML report also checks whether your bias drifted during the session. [EXPERIMENT.md](EXPERIMENT.md) explains how to read them. About 30 jumps give wide uncertainty; pool sessions for firmer answers.
+The key numbers are **bias** (early or late?) and **spread** (how scattered?). Both are measured from when the camera first *saw* your gesture, with the game's own wait removed; [EXPERIMENT.md](EXPERIMENT.md) explains the two clocks and how to read the report. About 30 jumps give wide uncertainty, so pool sessions for firmer answers.
 
 ## Collecting good data
 
 - **One file per session**, with a new name each time. Reusing a name overwrites the old file.
-- **Use sessions from commit `0901def` or later.** Earlier versions tied the physics to the camera speed, so narrow windows were not what the log said.
-- For comparing players, give everyone the same `--experiment-seed`. For repeat sessions of one player, change the seed so the order cannot be learned.
-- A 30 FPS webcam is fine: physics runs at a fixed 1/60 s. The camera only affects when a gesture is noticed.
-- CSV files are ignored by git (see `.gitignore`); add a `!data/name.csv` line to commit one on purpose.
+- **Same seed to compare players** (`--experiment-seed`); a new seed for repeat sessions of one player, so the order cannot be learned.
+- **Same preset for everyone** (`--preset`). It sets how many frames a gesture must be held, which adds delay.
+- Camera speed (a 30 FPS webcam is fine) only changes when a gesture is noticed, never the windows: physics runs at a fixed 1/60 s. Compare biases only on the same setup (see `AGENTS.md`, Timing).
+- Logs made before physics ran at a fixed 1/60 s are not comparable for tall obstacles; the header's `git_hash` says which code wrote a file.
+- CSV files are ignored by git; add a `!data/name.csv` line to `.gitignore` to commit one on purpose.
 
-## If something goes wrong
+## Troubleshooting
 
-- **Window not visible:** it may open behind other windows; click the game icon in the dock or taskbar.
+- **No window:** it may be behind others; click its icon in the dock or taskbar.
 - **Camera unavailable:** close other apps using it, check OS permissions, try `--camera 1`.
-- **No hand detected:** improve lighting, show the whole hand, move closer. The debug overlay (D) shows what the game sees.
-- **Thumb not recognised:** keep the other fingers curled and the hand upright, and lift the thumb clearly above the knuckle. The threshold is `THUMB_RISE_MIN` in `gesture_lib.py`. The thumb option is new and tuned on idealized hands, so expect to adjust it.
-- **Slow laptop:** lower the camera resolution or use `--preset 1`.
+- **No hand detected:** more light, whole hand in view, move closer. Press **D** to see what the game sees.
+- **Thumb not recognised:** curl the other fingers, keep the hand upright, lift the thumb clearly above the knuckle. The threshold is `THUMB_RISE_MIN` in `gesture_lib.py`; it was tuned on idealized hands, so adjust it for yours.
+- **Gestures feel late:** check FPS in the debug overlay; a slow camera delays recognition but does not change the physics.
 
-## How it fits together
+## Project map
 
 | Layer | Files |
 |---|---|
-| Perception: camera frames to a jump event | `gesture_lib.py`, `mp_compat.py` |
+| Perception: camera frames to a jump | `gesture_lib.py`, `mp_compat.py` |
 | Game: physics, obstacles, difficulty | `game.py`, `adaptive.py`, `jump_service.py` |
-| Experiment: planned obstacle lists, jump-time recording | `experiment.py`, `progressive.py` |
+| Experiment: obstacle plans, jump-time recording | `experiment.py`, `progressive.py` |
 | Analysis | `analyze_trials.py`, `report_html.py`, `analyze.py`, `summarize.py` |
 
-More: [EXPERIMENT.md](EXPERIMENT.md) (what is measured), [FUTURE.md](FUTURE.md) (ideas and research context), `AGENTS.md` (rules for contributors and agents), `gesture_landmarks_lab.ipynb` (how landmarks become features).
+Docs: [EXPERIMENT.md](EXPERIMENT.md) (what is measured), [FUTURE.md](FUTURE.md) (ideas, research context), `AGENTS.md` (rules for contributors and agents), `gesture_landmarks_lab.ipynb` (how landmarks become features).
 
 ## Classic adaptive mode
 
-Without `--experiment` or `--progressive`, a controller adapts a single difficulty number `d` to your success rate. It is fun for a few runs but settles into a rhythm, which is why the experiment modes exist.
+Without `--experiment` or `--progressive`, a controller adapts one difficulty number `d` to your success rate. It is fun for a few runs but settles into a rhythm, which is why the experiment modes exist.
 
 ```bash
 python game.py --log-outcomes data/alice.csv --log-latency data/alice_latency.csv --player alice --max-crashes 0
@@ -87,7 +88,7 @@ python analyze.py data/alice.csv
 python summarize.py data/alice.csv
 ```
 
-After `--max-crashes N` (default 3) the game stops and shows stats; `0` disables that. See all options with `python game.py --help`.
+After `--max-crashes N` (default 3) the game stops and shows stats; `0` disables that.
 
 ## Difficulty presets
 
@@ -97,17 +98,15 @@ After `--max-crashes N` (default 3) the game stops and shows stats; `0` disables
 | normal | 0.94 | 2 | 0.60 |
 | hard | 1.00 | 3 | 0.70 |
 
-Presets only set the starting difficulty (`d`, confidence threshold, stability frames); the controller then adapts to your success rate. Stability is how many consecutive frames the gesture must be held before it counts as a jump.
+A preset sets the starting `d`, the confidence threshold, and the stability (consecutive frames a gesture must be held to count as a jump). Only `d` then adapts.
 
-## For developers
+## Development
 
 ```bash
-pytest -q                          # pure logic tests; camera tests skip without a webcam
-python simulate_experiment.py --mu 0.03 --sigma 0.05 --out sim_trials.csv   # no camera needed
-python dev_bench.py report         # difficulty and feasibility benchmarks
-SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120      # headless smoke run
+pytest -q                                                                  # camera tests skip without a webcam
+python simulate_experiment.py --mu 0.03 --sigma 0.05 --out sim_trials.csv  # no camera needed
+python dev_bench.py feasibility                                            # clearance checks (see --help for more)
+SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120     # headless smoke run
 ```
 
-- Python 3.10 to 3.13. macOS, Windows and Linux should work; developed on macOS.
-- Some MediaPipe wheels (Python 3.13, Apple Silicon) ship only the Tasks API; `mp_compat.py` falls back automatically.
-- Tests: `tests/test_gesture_lib.py` (landmarks, classifiers), `tests/test_adaptive.py` (difficulty, physics, game loop), `tests/test_experiment.py`, `tests/test_progressive.py`, `tests/test_camera.py` (skipped without a camera).
+Some MediaPipe wheels (for example Python 3.13 on Apple Silicon) ship only the Tasks API; `mp_compat.py` falls back automatically. Tests live in `tests/`.

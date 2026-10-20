@@ -201,3 +201,28 @@ def test_planned_gap_is_not_overwritten():
     rec.register(first, next_gap_px=555.0)
     rec.register(second)
     assert float(rec.finish(first, 1, 1.0)["next_gap_px"]) == pytest.approx(555.0)
+
+
+def test_t_open_removes_lag_and_half_a_camera_frame():
+    rec = ex.TrialRecorder(CFG)
+    ob = _ob(300.0, h=60.0)
+    rec.register(ob, target_w=0.3, next_gap_px=800.0, index=0)
+    rec.note_jump(400.0, lag_s=0.033, cam_interval_s=0.0333)
+    row = rec.finish(ob, 1, 1.0)
+    assert float(row["open_lag_ms"]) == pytest.approx(33.0, abs=0.1)
+    assert float(row["cam_interval_ms"]) == pytest.approx(33.3, abs=0.1)
+    shift = 0.033 + 0.0333 / 2.0
+    assert float(row["t_j"]) - float(row["t_open"]) == pytest.approx(shift, abs=2e-4)
+    assert float(row["delta"]) - float(row["delta_open"]) == pytest.approx(shift, abs=2e-4)
+
+
+def test_open_columns_are_blank_without_lag_info_or_without_a_jump():
+    rec = ex.TrialRecorder(CFG)
+    a, b = _ob(300.0, h=60.0), _ob(900.0, h=60.0)
+    rec.register(a, target_w=0.3, next_gap_px=800.0, index=0)
+    rec.register(b, target_w=0.3, next_gap_px=800.0, index=1)
+    rec.note_jump(400.0)                                    # old-style call: no timing info
+    row = rec.finish(a, 1, 1.0)
+    assert row["t_open"] == "" and row["delta_open"] == "" and row["delta"] != ""
+    row = rec.finish(b, 0, 2.0)                             # never jumped
+    assert row["t_open"] == "" and row["open_lag_ms"] == ""

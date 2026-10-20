@@ -99,3 +99,24 @@ def test_plot_and_cli(tmp_path):
     with contextlib.redirect_stdout(io.StringIO()):
         assert at.main([str(path), "--plot", str(png)]) == 0
     assert png.exists() and png.stat().st_size > 5000
+
+
+def test_timing_uses_delta_open_but_the_outcome_model_keeps_the_game_clock():
+    plain = sim.simulate(seed=3, mu=0.03, sigma=0.05, blocks=6)
+    shifted = sim.simulate(seed=3, mu=0.03, sigma=0.05, blocks=6)
+    for r in shifted:
+        if r["delta"] != "":
+            r["delta_open"] = f"{float(r['delta']) - 0.05:.4f}"      # camera saw it 50 ms earlier
+    out_plain, _ = _report(_tagged(plain))
+    out, text = _report(_tagged(shifted))
+    assert out["mu"] == pytest.approx(out_plain["mu"] - 0.05, abs=1e-3)       # bias is the corrected one
+    assert out["sigma"] == pytest.approx(out_plain["sigma"], abs=1e-3)        # a constant shift keeps the spread
+    assert [t["predicted"] for t in out["table"]] == [t["predicted"] for t in out_plain["table"]]
+    assert "50 ms" in text and "later on average" in text
+
+
+def test_old_logs_without_delta_open_still_work():
+    rows = _tagged(sim.simulate(seed=4, mu=0.0, sigma=0.05, blocks=4))
+    assert at.timing_key(rows) == "delta"
+    _, text = _report(rows)
+    assert "later on average" not in text

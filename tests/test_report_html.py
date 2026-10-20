@@ -57,3 +57,12 @@ def test_by_speed_table_only_appears_with_several_speeds():
 
 def test_short_session_gets_a_polite_message_not_a_crash():
     assert "Fewer than 8" in build_html(_rows(n=5))
+
+
+def test_page_explains_the_two_clocks_when_delta_open_is_present():
+    rows = _rows()
+    for r in rows:
+        r["delta_open"] = str(float(r["delta"]) - 0.05)
+    page = build_html(rows)
+    assert "later on average" in page and "50 ms later" in page
+    assert "later on average" not in build_html(_rows())

@@ -37,6 +37,8 @@ Terms used throughout:
 | `L`, `U` | earliest and latest `t_j` that clear the obstacle |
 | `W = U - L` | the width of the safe window |
 | `delta` | `t_j` minus the middle of the window. 0 = perfectly centred, negative = early, positive = late |
+| `delta_open` | Like `delta`, but for when the camera first *saw* your gesture (minus half a camera frame): your timing with the game's own wait removed. Bias and spread are computed from this. Empty in older logs |
+| `t_open`, `open_lag_ms`, `cam_interval_ms` | The pieces behind `delta_open` |
 
 ## 3. Running it
 
@@ -71,6 +73,8 @@ One row per obstacle, in `--log-trials`:
 | `L`, `U`, `W` | the safe window from the physics (s) |
 | `t_j` | when you jumped (s); empty if you never jumped in time |
 | `delta` | `t_j` minus the middle of the window (s) |
+| `delta_open` | Like `delta`, but for when the camera first *saw* your gesture (minus half a camera frame): your timing with the game's own wait removed. Bias and spread are computed from this. Empty in older logs |
+| `t_open`, `open_lag_ms`, `cam_interval_ms` | The pieces behind `delta_open` |
 | `predicted_success` | 1 if `t_j` was inside `[L, U]`: what the physics predicts |
 | `outcome` | 1 if the game says you cleared it, 0 if you crashed |
 | `failure_mode` | for a crash: `early`, `late`, `no_jump`, or `unexplained` |
@@ -90,7 +94,7 @@ For every jump, was the physics right about the result? A few disagreements righ
 ### 5.3 Your timing: bias and spread
 Two numbers describe your jumps:
 
-- **Bias**: your average `delta`. "+30 ms" means you jump 30 ms later than the middle of the window, on average.
+- **Bias**: your average `delta_open` (`delta` in older logs). "+30 ms" means you jump 30 ms later than the middle of the window, on average.
 - **Spread**: how scattered your jumps are around your own average (the standard deviation). "50 ms" means about two thirds of your jumps land within 50 ms of your average.
 
 Bias is a habit you could correct. Spread is the precision you cannot easily remove, and it decides how narrow a window you can handle. The report shows how uncertain each number is. With 31 obstacles the spread is only known to about +-6 ms.
@@ -140,3 +144,18 @@ The derivation of the window is in `dino_jump_success_model.md`.
 ## 8. Not done yet
 
 This first version measures **timing precision only**. Not yet measured: how short a gap between obstacles you can handle, how speed changes your timing, and how late an obstacle can appear. Each can be added the same way: a new list of designed obstacles and one more analysis.
+
+
+## Two clocks: when the game acted, and when the camera saw you
+
+`t_j` / `delta` say when the **game** started the jump. That is what decides clear or crash, so
+the physics check and the "model says" column use it.
+
+`t_open` / `delta_open` say when the **camera first saw your gesture**, minus half a camera frame
+(the average wait for the next frame). It removes the game's own wait: the frames the gesture
+must be held (stability) and the average sampling delay. Bias and spread come from it.
+
+What is still inside `delta_open`: the camera's internal delay (exposure, processing, USB), which
+software cannot see, and your own movement time until the pose is recognised. Neither can be
+corrected here. Measure the camera delay once with a slow-motion video of your hand and the
+screen if you need absolute numbers. When comparing gestures, compare spreads rather than biases.

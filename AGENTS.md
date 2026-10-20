@@ -46,3 +46,10 @@ python dev_bench.py report
 ## Gotchas
 - `mp_compat.py` prefers MediaPipe legacy `solutions`; when those are missing it falls back to the Tasks API using a downloaded `hand_landmarker.task` model. Pre-download it to `~/.cache/fontys_gesture_lab/hand_landmarker.task` for offline use.
 - `game.py` and a few game-loop tests need pygame and cv2; pure tests never do.
+
+## Timing (grep `TIMING:` for the matching code notes)
+- Physics runs in fixed `experiment.FRAME_DT` (1/60 s) steps. Why: gravity makes the jump arc depend on the step size, and the experiment windows are computed for that step. The game loop is camera-bound (`cap.read()` blocks), so frame time is the camera interval, not `FPS_TARGET`. Never use it as the physics step; `adaptive.fixed_steps` converts it to whole steps.
+- Camera speed only changes when a gesture is noticed (up to one camera interval, plus `stability` frames). It never changes windows or outcomes.
+- Two clocks in the trial log. `t_j`/`delta`: when the game started the jump; decides the outcome, so the physics check and success model use it. `t_open`/`delta_open`: first camera frame that showed the gesture minus half a camera interval; bias, spread and drift use it. Do not mix them.
+- Not correctable in software, so it stays in `delta_open`: the camera's internal delay and the player's movement time. Compare spreads, not biases, across gestures or setups.
+- `TRIAL_HEADER` is append-only.

@@ -17,6 +17,7 @@ import statistics
 import subprocess
 import sys
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -522,6 +523,9 @@ def main():
     state.stable_count = 0
     state.jump_latched = False
     first_open_time = 0.0
+    first_open_read = 0.0
+    last_frame_read = None
+    cam_intervals: deque = deque(maxlen=30)
     camera_surface = None
 
     # Game state (constants kept local; mutable state lives in ``state``)
@@ -614,12 +618,9 @@ def main():
     running = True
     while running:
         loop_start = time.perf_counter()
-        # NOTE (agents): game FPS is coupled to camera FPS. cap.read() below blocks,
-        # so one loop pass lasts about one camera interval (about 33 ms for a 30 FPS
-        # webcam), not 1/FPS_TARGET. raw_dt is that time. Never use it as the physics
-        # step: gravity makes the jump arc depend on the step size, and the
-        # experiment windows assume 1/60 s. Physics runs in fixed FRAME_DT steps via
-        # fixed_steps() below; camera FPS should only affect jump start time t_j.
+        # TIMING: cap.read() below blocks, so a loop pass lasts one camera interval, not
+        # 1/FPS_TARGET, and raw_dt is that time. Never use it as the physics step (see
+        # AGENTS.md, Timing); physics runs in fixed FRAME_DT steps via fixed_steps().
         raw_dt = min(clock.tick(FPS_TARGET) / 1000.0, 0.05)
         dt = raw_dt if state.phase == Phase.PLAYING else 0.0
 
@@ -656,6 +657,9 @@ def main():
 
         ok, frame = cap.read()
         frame_read_time = time.perf_counter()
+        if last_frame_read is not None:
+            cam_intervals.append(frame_read_time - last_frame_read)   # camera pace, for t_open
+        last_frame_read = frame_read_time
         infer_ms = 0.0
         if ok:
             frame = cv2.flip(frame, 1)
@@ -686,6 +690,7 @@ def main():
         if state.phase == Phase.PLAYING and detected == trigger and score >= state.threshold:
             if state.stable_count == 0:
                 first_open_time = time.perf_counter()
+                first_open_read = frame_read_time    # when the camera frame with the gesture arrived
             state.stable_count += 1
             if state.stable_count >= state.stability and not state.jump_latched:
                 open_event = True
@@ -708,6 +713,11 @@ def main():
                         args.experiment_speed if experiment_mode
                         else difficulty_profile(controller.d, config).speed,
                         per_obstacle=args.progressive,
+                        # TIMING: lets the log say when the gesture was SEEN, not when the game
+                        # acted (stability wait + half a camera interval removed); see TRIAL_HEADER.
+                        lag_s=jump_time - first_open_read,
+                        cam_interval_s=(statistics.median(cam_intervals)
+                                        if len(cam_intervals) >= 5 else None),
                     )
             else:
                 rejected_jumps += 1

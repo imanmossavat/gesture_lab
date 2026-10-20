@@ -80,6 +80,16 @@ def _num(row: dict, key: str) -> Optional[float]:
 # Small statistics helpers (plain Python, so each step can be read)
 # ---------------------------------------------------------------------------
 
+def timing_key(rows: Sequence[dict]) -> str:
+    """TIMING: the column holding the player's timing.
+
+    ``delta_open`` (when the camera first SAW the gesture, minus half a camera frame)
+    if the log has it, otherwise ``delta`` (when the game started the jump).  The
+    outcome model in section 4 always uses ``delta``: that is what decides clear or crash.
+    """
+    return "delta_open" if any(_num(r, "delta_open") is not None for r in rows) else "delta"
+
+
 def mean_and_spread(values: Sequence[float]) -> tuple[float, float]:
     """Average and sample standard deviation."""
     mu = statistics.fmean(values)
@@ -188,14 +198,14 @@ def success_by_window(rows: Sequence[dict], fit: Optional[js.GaussianTiming]) ->
     return table
 
 
-def spread_by_window(rows: Sequence[dict]) -> list[tuple[float, int, float]]:
+def spread_by_window(rows: Sequence[dict], key: str = "delta") -> list[tuple[float, int, float]]:
     """Spread of delta for wide / medium / narrow windows.
 
     A simple bell-curve model assumes the spread is the same for every
     obstacle.  If narrow windows show a clearly different spread, the model
     needs to depend on the window (or the height).
     """
-    pairs = [(_num(r, "W"), _num(r, "delta")) for r in rows]
+    pairs = [(_num(r, "W"), _num(r, key)) for r in rows]
     pairs = sorted((w, d) for w, d in pairs if w is not None and d is not None)
     if len(pairs) < 9:
         return []
@@ -231,7 +241,9 @@ def build_report(rows: Sequence[dict]) -> dict:
         return out
 
     outcomes = [int(float(r["outcome"])) for r in rows]
-    deltas = [d for d in (_num(r, "delta") for r in rows) if d is not None]
+    dkey = timing_key(rows)
+    deltas = [d for d in (_num(r, dkey) for r in rows) if d is not None]          # your timing
+    game_deltas = [d for d in (_num(r, "delta") for r in rows) if d is not None]  # decides the outcome
     sources = sorted({r["_source"] for r in rows})
 
     print("=" * 64)
@@ -289,7 +301,8 @@ def build_report(rows: Sequence[dict]) -> dict:
         # Standard error of the average, and an approximate one for the spread.
         se_mu = sigma / math.sqrt(len(deltas))
         se_sigma = sigma / math.sqrt(2 * (len(deltas) - 1))
-        fit = js.GaussianTiming(mu=mu, sigma0=sigma)
+        g_mu, g_sigma = mean_and_spread(game_deltas)
+        fit = js.GaussianTiming(mu=g_mu, sigma0=g_sigma)     # predicts outcomes, so it uses the game clock
         out.update(mu=mu, sigma=sigma, se_mu=se_mu, se_sigma=se_sigma, n_deltas=len(deltas))
         direction = "late" if mu > 0 else "early"
         print(f"Bias  : {_ms(mu)}  (about +-{se_mu * 1000:.0f} ms uncertainty)")
@@ -299,6 +312,13 @@ def build_report(rows: Sequence[dict]) -> dict:
         print("        Roughly 2 out of 3 of your jumps land within this distance of your\n"
               "        own average.")
         print(f"Based on {len(deltas)} jumps.")
+        if dkey == "delta_open":
+            pairs = [(_num(r, "delta"), _num(r, "delta_open")) for r in rows]
+            shift = statistics.fmean(a - b for a, b in pairs if a is not None and b is not None)
+            print("Timing is when the camera first saw your gesture, minus half a camera frame,\n"
+                  "so the game's own wait is removed. The game then started your jumps\n"
+                  f"{shift * 1000:.0f} ms later on average, and that later time decides clear or crash\n"
+                  "(section 4 uses it).")
         missing = n - len(deltas)
         if missing:
             print(f"Note: {missing} obstacles had no jump before they arrived. They are\n"
@@ -354,7 +374,7 @@ def build_report(rows: Sequence[dict]) -> dict:
             print("What this means: nothing here contradicts a bell curve, within what\n"
                   "this many jumps can show.")
 
-        thirds = spread_by_window(rows)
+        thirds = spread_by_window(rows, dkey)
         out["spread_by_window"] = thirds
         if thirds:
             print("\nIs the spread the same for wide and narrow windows?")
@@ -400,7 +420,7 @@ def make_plot(rows: Sequence[dict], summary: dict, path: str) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    deltas = [d for d in (_num(r, "delta") for r in rows) if d is not None]
+    deltas = [d for d in (_num(r, timing_key(rows)) for r in rows) if d is not None]
     fig, ax = plt.subplots(2, 2, figsize=(12, 9))
     fig.suptitle("Jump timing: what happened, and whether the model fits", fontsize=14)
 

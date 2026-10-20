@@ -264,6 +264,14 @@ TRIAL_HEADER = [
     "predicted_success",  # 1 if L <= t_j <= U (what the physics predicts)
     "outcome",            # 1 = cleared, 0 = crashed (what the game decided)
     "failure_mode",       # early / late / no_jump / unexplained (empty on success)
+    # TIMING: two clocks.  t_j is when the GAME started the jump (it decides clear or crash).
+    # t_open is when the camera first SAW the gesture, minus the average wait for the
+    # next camera frame: your timing with the software's own delay removed.  What is
+    # left in it is the camera's internal delay and your movement time (not measurable here).
+    "open_lag_ms",        # first frame that showed the gesture -> jump applied (ms); empty if unknown
+    "cam_interval_ms",    # camera frame interval when you jumped (ms); empty if unknown
+    "t_open",             # t_j - open_lag - cam_interval / 2 (s)
+    "delta_open",         # t_open minus the window centre (s); the number to read for YOUR timing
 ]
 
 
@@ -275,6 +283,8 @@ class _LiveTrial:
     target_w: Optional[float]
     next_gap_px: Optional[float]
     t_j: Optional[float] = None
+    lag_s: Optional[float] = None       # first gesture frame -> jump applied (s)
+    cam_s: Optional[float] = None       # camera frame interval (s)
 
 
 class TrialRecorder:
@@ -312,7 +322,10 @@ class TrialRecorder:
         self._live.append(_LiveTrial(obstacle, index, target_w, next_gap_px))
 
     # -- step 2: the player jumps ----------------------------------------
-    def note_jump(self, speed: float, per_obstacle: bool = False) -> Optional[float]:
+    def note_jump(
+        self, speed: float, per_obstacle: bool = False,
+        lag_s: Optional[float] = None, cam_interval_s: Optional[float] = None,
+    ) -> Optional[float]:
         """Remember when this jump happened, for the obstacle it belongs to.
 
         A jump belongs to the nearest obstacle that has NOT yet reached the
@@ -336,6 +349,7 @@ class TrialRecorder:
             speed = nearest.obstacle.speed_spawn     # speed ladder: use the obstacle's own speed
         t_j = -(nearest.obstacle.x - player_front) / speed
         nearest.t_j = t_j
+        nearest.lag_s, nearest.cam_s = lag_s, cam_interval_s   # for t_open (see TRIAL_HEADER)
         return t_j
 
     # -- step 3: the game decides the outcome ----------------------------
@@ -357,6 +371,9 @@ class TrialRecorder:
         jumped = t_j is not None
         delta = (t_j - window.centre) if jumped and window.feasible else None
         predicted = int(jumped and window.L <= t_j <= window.U)
+        corrected = jumped and live.lag_s is not None and live.cam_s is not None
+        t_open = (t_j - live.lag_s - live.cam_s / 2.0) if corrected else None
+        delta_open = (t_open - window.centre) if corrected and window.feasible else None
 
         return {
             "t_s": f"{play_time:.3f}",
@@ -379,6 +396,10 @@ class TrialRecorder:
             "predicted_success": predicted,
             "outcome": int(outcome),
             "failure_mode": classify_failure(outcome, t_j, window),
+            "open_lag_ms": _fmt(live.lag_s * 1000 if corrected else None, 1),
+            "cam_interval_ms": _fmt(live.cam_s * 1000 if corrected else None, 1),
+            "t_open": _fmt(t_open, 4),
+            "delta_open": _fmt(delta_open, 4),
         }
 
 

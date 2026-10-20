@@ -289,7 +289,7 @@ def attempt_jump(
 
 
 def fixed_steps(accum: float, frame_s: float, step_s: float) -> tuple[int, float]:
-    """Split elapsed real time into whole fixed physics steps.
+    """TIMING: split elapsed real time into whole fixed physics steps.
 
     The camera sets how often the game loop runs (often about 30 frames per
     second), but the jump and obstacle windows are only valid for a fixed

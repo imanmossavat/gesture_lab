@@ -235,8 +235,10 @@ def _jumps(rows):
     for r in rows:
         d, w = _num(r, "delta"), _num(r, "W")
         if d is not None and w is not None:
+            h = _num(r, "delta_open")
             out.append({"delta": d * 1000, "W": w * 1000, "ok": _flag(r, "outcome"),
-                        "speed": _num(r, "speed") or 0.0})
+                        "speed": _num(r, "speed") or 0.0,
+                        "human": (d if h is None else h) * 1000, "has_open": h is not None})
     return out
 
 
@@ -252,8 +254,11 @@ def build_html(rows: Sequence[dict]) -> str:
         parts.append("<p>Fewer than 8 measured jumps: play a longer session before reading anything into the numbers.</p>")
         return _page("".join(parts))
 
-    deltas = [j["delta"] for j in jumps]
-    mu, sigma = statistics.fmean(deltas), statistics.stdev(deltas)
+    deltas = [j["delta"] for j in jumps]          # when the game started each jump: decides the outcome
+    mu_g, sigma_g = statistics.fmean(deltas), statistics.stdev(deltas)
+    human = [j["human"] for j in jumps]           # when the camera first saw the gesture (software wait removed)
+    mu, sigma = statistics.fmean(human), statistics.stdev(human)
+    corrected = all(j["has_open"] for j in jumps)
     se_mu, se_sig = sigma / math.sqrt(len(deltas)), sigma / math.sqrt(2 * len(deltas))
     pc = sum(1 for r in feasible if _flag(r, "predicted_success") == _flag(r, "outcome") and _num(r, "t_j") is not None)
     pj = sum(1 for r in feasible if _num(r, "t_j") is not None)
@@ -266,6 +271,11 @@ def build_html(rows: Sequence[dict]) -> str:
                  f'<div class="card">physics check<b>{pc}/{pj}</b>outcomes predicted</div></div>')
     tip = ("Wait a beat before opening your hand." if mu < -15 else
            "Open your hand a little sooner." if mu > 15 else "Your timing is well centred on average.")
+    if corrected:
+        parts.append("<p class=\"mut\">Bias and spread are your timing from when the camera first saw your gesture "
+                     f"(minus half a camera frame), so the game's own wait is removed. The game then started your jumps "
+                     f"{mu_g - mu:.0f} ms later on average, and that later time decides clear or crash, so the first chart "
+                     "and the success curve use it.</p>")
     parts.append(f"<p>On average your jumps land <b>{abs(mu):.0f} ms {'early' if mu < 0 else 'late'}</b> relative to the middle "
                  f"of the safe window, and about two out of three land within <b>{sigma:.0f} ms</b> of your own average. {tip}</p>")
 
@@ -281,19 +291,21 @@ def build_html(rows: Sequence[dict]) -> str:
                  "With about 30 jumps the shaded band is wide, so only a large, steady move would show.</p>")
     parts.append("<h2>Chance of clearing by window width</h2>"
                  '<p class="mut">Dots: what happened, with 95% ranges. Line: what a bell curve with your bias and spread predicts.</p>'
-                 + chart_success(all_ws, mu, sigma))
+                 + chart_success(all_ws, mu_g, sigma_g))
     parts.append("<h2>Where your jumps landed</h2>"
-                 '<p class="mut">Bars: your jumps. Line: the bell curve fitted to them.</p>' + chart_hist(deltas, mu, sigma))
+                 '<p class="mut">Bars: your jumps. Line: the bell curve fitted to them.</p>' + chart_hist(human, mu, sigma))
 
     speeds = sorted({round(j["speed"]) for j in jumps if j["speed"]})
     if len(speeds) > 1:
         body = ""
         for s in speeds:
-            ds = [j["delta"] for j in jumps if round(j["speed"]) == s]
-            if len(ds) >= 4:
-                m, sd = statistics.fmean(ds), statistics.stdev(ds)
-                body += (f"<tr><td>{s} px/s</td><td>{len(ds)}</td><td>{m:+.0f}</td><td>{sd:.0f}</td>"
-                         f"<td>{window_for_rate(0.7, m, sd):.0f}</td></tr>")
+            sel = [j for j in jumps if round(j["speed"]) == s]
+            if len(sel) >= 4:
+                hs, gs = [j["human"] for j in sel], [j["delta"] for j in sel]
+                m, sd = statistics.fmean(hs), statistics.stdev(hs)
+                mg, sg = statistics.fmean(gs), statistics.stdev(gs)        # the window needed uses the game clock
+                body += (f"<tr><td>{s} px/s</td><td>{len(sel)}</td><td>{m:+.0f}</td><td>{sd:.0f}</td>"
+                         f"<td>{window_for_rate(0.7, mg, sg):.0f}</td></tr>")
         parts.append("<h2>By speed</h2><table><tr><th>speed</th><th>jumps</th><th>bias (ms)</th><th>spread (ms)</th>"
                      "<th>window for 70% (ms)</th></tr>" + body + "</table>"
                      '<p class="mut">The last column is the narrowest safe window you would clear 70% of the time at that speed.</p>')

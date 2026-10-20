@@ -54,5 +54,5 @@ The drift model's behavior (from a simulation of 200 sessions each, 31 jumps): i
 
 - **Thumb gesture** is tuned on idealized synthetic hands. It needs a check with real hands (orientation, handedness, different thumbs); `THUMB_RISE_MIN` in `gesture_lib.py` is the knob.
 - **Progressive mode** is verified only with a scripted player; it needs a pilot with people to see whether it feels less repetitive than the fixed list.
-- **Bias includes delay.** Camera sampling, detection, and stability frames add to the measured bias. Log the measured camera FPS in the trial header.
+- **Delay still in the bias.** `delta_open` removes the stability wait and the average sampling wait. Still in it: the camera's internal delay and your movement time until the pose is recognised. A slow-motion video calibration (240 fps phone, hand and screen in one shot) would measure the camera part. Log the measured camera FPS in the trial header.
 - **Old logs.** Sessions recorded before commit `0901def` have wrong windows for tall obstacles; do not pool them.
