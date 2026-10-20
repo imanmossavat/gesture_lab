@@ -1,9 +1,9 @@
 """Tests for the progressive plan (speed ladder + staircase).  Pure logic."""
 import random
 
-from adaptive import Config
-from experiment import game_window
-from progressive import W_MAX, W_MIN, ProgressivePlan
+from gesture_lab.adaptive import Config
+from gesture_lab.experiment import game_window
+from gesture_lab.progressive import W_MAX, W_MIN, ProgressivePlan
 
 
 def _plan(seed=1, **kw):

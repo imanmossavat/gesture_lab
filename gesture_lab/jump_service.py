@@ -1,7 +1,7 @@
 """Jump-success services: physics window + player timing model.
 
 Pure Python (no pygame, cv2, mediapipe).  Implements the model in
-dino_jump_success_model.md:
+docs/dino_jump_success_model.md:
 
     P(success | x, h) = F(U) - F(L)
 
@@ -20,7 +20,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Protocol, Sequence
 
-from adaptive import Config, difficulty_profile, jump_peak, air_time
+from gesture_lab.adaptive import Config, difficulty_profile, jump_peak, air_time
 
 
 # ---------------------------------------------------------------------------

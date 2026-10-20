@@ -5,10 +5,10 @@ import statistics
 
 import pytest
 
-from adaptive import Config, Obstacle
-import experiment as ex
-import jump_service as js
-import simulate_experiment as sim
+from gesture_lab.adaptive import Config, Obstacle
+from gesture_lab import experiment as ex
+from gesture_lab import jump_service as js
+from gesture_lab import simulate_experiment as sim
 
 CFG = Config()
 FRONT = CFG.PLAYER_X + CFG.PLAYER_WIDTH

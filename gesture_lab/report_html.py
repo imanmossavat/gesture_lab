@@ -2,7 +2,7 @@
 """One self-contained HTML page about a player's jump timing.
 
     python report_html.py data/alice_run1.csv --out report.html
-    python analyze_trials.py data/alice_run1.csv --html report.html   # same thing
+    python -m gesture_lab.analyze_trials data/alice_run1.csv --html report.html   # same thing
 
 The text report (``analyze_trials.py``) stays the place for quick numbers.  This
 page adds pictures and one extra model that only lives here: **drift**.
@@ -25,7 +25,7 @@ import statistics
 import sys
 from typing import Optional, Sequence
 
-from analyze_trials import _flag, _num, load_trials
+from gesture_lab.analyze_trials import _flag, _num, load_trials
 
 # ---------------------------------------------------------------------------
 # Small maths helpers (milliseconds everywhere in this file)

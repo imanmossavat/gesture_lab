@@ -23,9 +23,9 @@ import math
 import random
 from typing import Optional
 
-import jump_service as js
-from adaptive import Config
-from experiment import Trial, game_physics
+from gesture_lab import jump_service as js
+from gesture_lab.adaptive import Config
+from gesture_lab.experiment import Trial, game_physics
 
 W_MIN, W_MAX = 0.05, 0.45     # seconds: 50 ms is hard but feasible, 450 ms is easy
 STEP_DOWN = 0.07              # log-step after a clear (window shrinks about 7 %)

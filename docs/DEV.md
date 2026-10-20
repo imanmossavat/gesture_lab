@@ -4,15 +4,15 @@
 
 | File | Responsibility |
 |---|---|
-| `adaptive.py` | Pure difficulty model, physics, controller, obstacle resolution, latency tracker, CSV headers, `Phase`/`next_phase`. |
-| `mp_compat.py` | MediaPipe compatibility shim. |
-| `game.py` | UI, camera, event loop; drives `next_phase`. |
-| `dev_bench.py` | Headless bench for tuning. |
+| `gesture_lab/adaptive.py` | Pure difficulty model, physics, controller, obstacle resolution, latency tracker, CSV headers, `Phase`/`next_phase`. |
+| `gesture_lab/mp_compat.py` | MediaPipe compatibility shim. |
+| `gesture_lab/game.py` | UI, camera, event loop; drives `next_phase`. |
+| `gesture_lab/dev_bench.py` | Headless bench for tuning. |
 | `tests/test_adaptive.py` | Unit tests. |
 
 ## Phase flow
 
-The game loop uses `adaptive.Phase` and `adaptive.next_phase`. READY/PAUSED/OVER frames use `dt = 0` and ignore jumps. SPACE advances the phase; preset keys always return to READY. Smoke mode forces PLAYING. See `game.py`.
+The game loop uses `adaptive.Phase` and `adaptive.next_phase`. READY/PAUSED/OVER frames use `dt = 0` and ignore jumps. SPACE advances the phase; preset keys always return to READY. Smoke mode forces PLAYING. See `gesture_lab/game.py`.
 
 ## Stop rule
 
@@ -24,7 +24,7 @@ Spawn interval and obstacle height are sampled from normal distributions defined
 
 ## Difficulty model
 
-`d ∈ [0, 1]`. `difficulty_profile(d, cfg)` returns speed, height, width, and spawn interval. Run `python dev_bench.py report` for the current numbers.
+`d ∈ [0, 1]`. `difficulty_profile(d, cfg)` returns speed, height, width, and spawn interval. Run `python -m gesture_lab.dev_bench report` for the current numbers.
 
 ## Physics
 
@@ -40,7 +40,7 @@ Default `wild`: each gap is drawn uniformly between the shortest feasible gap (`
 
 ### Probe mode (tight gaps, for measuring recovery time)
 
-`--spawn-mode probe --rest-range LO HI` samples the **rest time** directly: spawn-to-spawn gap = air time + U(LO, HI). Rest is the time between landing and the ideal take-off for the next obstacle when the previous jump was perfectly timed (negative rest is impossible without early/late luck). The normal game never goes below about 0.44 s of rest; probe mode ignores the profile interval and the min-gap floor (only overlap is forbidden), default range 0.0-0.7 s. Use a fixed difficulty for clean data: `--start-d 0.5 --adaptation-rate 0.000001`. Each outcome row now has a `gap_s` column (time since the previous spawn); `summarize.py` turns it into "success by rest time" (previous obstacle cleared; compared with the timing-only model fitted on long-rest pairs; bins marked `<< below model` show recovery/decision time, not timing precision, is the limit).
+`--spawn-mode probe --rest-range LO HI` samples the **rest time** directly: spawn-to-spawn gap = air time + U(LO, HI). Rest is the time between landing and the ideal take-off for the next obstacle when the previous jump was perfectly timed (negative rest is impossible without early/late luck). The normal game never goes below about 0.44 s of rest; probe mode ignores the profile interval and the min-gap floor (only overlap is forbidden), default range 0.0-0.7 s. Use a fixed difficulty for clean data: `--start-d 0.5 --adaptation-rate 0.000001`. Each outcome row now has a `gap_s` column (time since the previous spawn); `gesture_lab/summarize.py` turns it into "success by rest time" (previous obstacle cleared; compared with the timing-only model fitted on long-rest pairs; bins marked `<< below model` show recovery/decision time, not timing precision, is the limit).
 
 ## Spawn / min-gap
 
@@ -54,22 +54,22 @@ Default `wild`: each gap is drawn uniformly between the shortest feasible gap (`
 
 - `--log-latency path.csv` writes one row per jump event.
 - `--log-outcomes path.csv` writes one row per obstacle outcome; `t_s` is game time.
-- Analyze with `analyze.py` and `summarize.py`.
+- Analyze with `gesture_lab/analyze.py` and `gesture_lab/summarize.py`.
 
 ## Running checks
 
 ```bash
 pytest -q
 SDL_VIDEODRIVER=dummy python game.py --dummy-camera --smoke-frames 120
-python dev_bench.py feasibility
-python dev_bench.py report
-python dev_bench.py simulate --frames 2000 --csv sim.csv
-python analyze.py sim.csv
+python -m gesture_lab.dev_bench feasibility
+python -m gesture_lab.dev_bench report
+python -m gesture_lab.dev_bench simulate --frames 2000 --csv sim.csv
+python -m gesture_lab.analyze sim.csv
 ```
 
 ## MediaPipe note
 
-Recent MediaPipe wheels (especially Python 3.13 / Apple Silicon) ship only the Tasks API. `mp_compat.py` falls back automatically and downloads `hand_landmarker.task` to `~/.cache/fontys_gesture_lab/` on first use. Pre-download the model for offline use.
+Recent MediaPipe wheels (especially Python 3.13 / Apple Silicon) ship only the Tasks API. `gesture_lab/mp_compat.py` falls back automatically and downloads `hand_landmarker.task` to `~/.cache/fontys_gesture_lab/` on first use. Pre-download the model for offline use.
 
 ## Ideas not implemented
 

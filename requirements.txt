@@ -1,11 +1,2 @@
-# Runtime and notebook dependencies.
-# Tested on macOS with Python 3.11. Windows users: same packages work, but
-# you may need to change the camera index in game.py or the notebook if
-# cv2.VideoCapture(0) does not open your webcam.
-mediapipe>=0.10.0
-opencv-python>=4.8.0
-pygame>=2.5.0
-numpy>=1.26.0
-matplotlib>=3.8.0
-jupyter>=1.0.0
-pytest>=7.0.0
+# Dependencies live in pyproject.toml. This line keeps `pip install -r requirements.txt` working.
+-e .[dev]

@@ -6,7 +6,7 @@ These tests are pure logic and should pass on any machine, with or without a cam
 import numpy as np
 import pytest
 
-from gesture_lib import (
+from gesture_lab.gesture_lib import (
     GESTURES,
     RuleClassifier,
     feature_vector,
@@ -143,13 +143,13 @@ def _hand(fingers_up, thumb):
 
 
 def test_thumb_classifier_detects_thumb_up_from_fist():
-    from gesture_lib import ThumbClassifier
+    from gesture_lab.gesture_lib import ThumbClassifier
     label, score = ThumbClassifier().classify(_hand(False, "up"))
     assert label == "thumb" and 0.6 <= score <= 0.99
 
 
 def test_thumb_classifier_keeps_fist_and_other_poses():
-    from gesture_lib import ThumbClassifier
+    from gesture_lab.gesture_lib import ThumbClassifier
     c = ThumbClassifier()
     assert c.classify(_hand(False, "tucked"))[0] == "fist"
     assert c.classify(_hand(False, "side"))[0] == "fist"      # thumb out sideways is not thumb up
@@ -161,7 +161,7 @@ def test_rule_classifier_never_returns_thumb():
 
 
 def test_make_classifier_selects_by_name_and_rejects_unknown():
-    from gesture_lib import ThumbClassifier, make_classifier
+    from gesture_lab.gesture_lib import ThumbClassifier, make_classifier
     assert type(make_classifier("open")) is RuleClassifier
     assert isinstance(make_classifier("thumb"), ThumbClassifier)
     with pytest.raises(ValueError):

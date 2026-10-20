@@ -9,9 +9,9 @@ Two CSV types are detected automatically from the header:
              width, outcome (1 = cleared, 0 = crashed)   (written by --log-outcomes)
 
 Examples:
-    python analyze.py run1.csv
-    python analyze.py run1.csv --trim-start 5 --trim-end 5 --plot report.png
-    python analyze.py data/*.csv --trim-start-s 20 --trim-end-s 10
+    python -m gesture_lab.analyze run1.csv
+    python -m gesture_lab.analyze run1.csv --trim-start 5 --trim-end 5 --plot report.png
+    python -m gesture_lab.analyze data/*.csv --trim-start-s 20 --trim-end-s 10
 
 Trimming: --trim-start/--trim-end drop N rows; --trim-start-s/--trim-end-s drop
 seconds (needs a t_s column). Trimmed rows are shaded grey in the plots.
@@ -129,7 +129,7 @@ def design_margins():
     """Timing budget per difficulty, from the game's own physics (adaptive.py)."""
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from adaptive import Config, difficulty_profile, timing_window
+        from gesture_lab.adaptive import Config, difficulty_profile, timing_window
     except Exception:
         return None
     cfg = Config()

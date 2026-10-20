@@ -28,7 +28,7 @@ Treat the game as an **experiment on a person**, not a difficulty dial.
 - `[L, U]`: window of jump times that clear the obstacle and land before the next one.
 - `W = U − L`: window width, the available timing margin.
 - `δ = t_j − (L + U)/2`: timing error relative to the window centre.
-- Physics in `jump_service.py` and in `dino_jump_success_model.md`.
+- Physics in `gesture_lab/jump_service.py` and in `dino_jump_success_model.md`.
 
 ## 4. Requirements
 
@@ -69,7 +69,7 @@ Rule for assigning a jump to an obstacle: the accepted jump whose takeoff is the
 
 ### 4.4 Constraints
 
-- `adaptive.py` and `gesture_lab` logic stay free of pygame, cv2 and mediapipe imports.
+- `gesture_lab/adaptive.py` and `gesture_lab` logic stay free of pygame, cv2 and mediapipe imports.
 - Respect `AGENTS.md` invariants. Adding columns to `OUTCOME_HEADER` is allowed only by **appending** them at the end, with the tests updated together.
 - The existing controller and `d` stay in the code and are simply unused in experiment mode.
 - Safety: every obstacle is feasible, easy obstacles are mixed in, and no run ends on a long streak of hard ones.

@@ -33,8 +33,8 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-from adaptive import Config, Obstacle
-import jump_service as js
+from gesture_lab.adaptive import Config, Obstacle
+from gesture_lab import jump_service as js
 
 
 # ---------------------------------------------------------------------------

@@ -5,9 +5,9 @@ Input : one or more CSV files written by ``game.py --log-trials`` (or by
         ``simulate_experiment.py``).
 Output: a short written report in plain language, and optionally a picture.
 
-    python analyze_trials.py trials.csv
-    python analyze_trials.py trials.csv --plot report.png
-    python analyze_trials.py a.csv b.csv          # pool several sessions
+    python -m gesture_lab.analyze_trials trials.csv
+    python -m gesture_lab.analyze_trials trials.csv --plot report.png
+    python -m gesture_lab.analyze_trials a.csv b.csv          # pool several sessions
 
 How to read the report
 ----------------------
@@ -42,8 +42,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from analyze import wilson          # 95 % confidence interval for a proportion
-import jump_service as js           # GaussianTiming: the bell-curve model
+from gesture_lab.analyze import wilson          # 95 % confidence interval for a proportion
+from gesture_lab import jump_service as js           # GaussianTiming: the bell-curve model
 
 MIN_TRIALS_FOR_FIT = 8              # below this, numbers are too uncertain to print
 FRAME_MS = 1000.0 / 60.0            # one game frame, used as the physics tolerance
@@ -511,7 +511,7 @@ def main(argv=None) -> int:
         make_plot(rows, summary, args.plot)
         print(f"Picture saved to {args.plot}")
     if args.html and rows:
-        from report_html import build_html   # imported here: report_html imports this module
+        from gesture_lab.report_html import build_html   # imported here: report_html imports this module
         with open(args.html, "w", encoding="utf-8") as f:
             f.write(build_html(rows))
         print(f"HTML report saved to {args.html}")

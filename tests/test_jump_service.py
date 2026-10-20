@@ -3,8 +3,8 @@ import random
 
 import pytest
 
-from adaptive import Config, timing_window, time_above, difficulty_profile
-import jump_service as js
+from gesture_lab.adaptive import Config, timing_window, time_above, difficulty_profile
+from gesture_lab import jump_service as js
 
 CFG = Config()
 

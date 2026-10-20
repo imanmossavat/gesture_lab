@@ -22,14 +22,14 @@ The gap this lab could fill: temporal precision of **camera-tracked hand gesture
 4. Does bias drift within a session? (The HTML report has a drift model.)
 5. Engagement: needs a survey step and a randomized manipulation (see below).
 
-**Sizing a study.** The uncertainty on a spread is about σ / √(2n). To see a 15 ms difference in spread between two gestures for one player (σ about 70 ms) you need about 100 jumps per gesture (n ≈ (σ / SE)², with SE of the difference about 7 ms). Run `simulate_experiment.py` first to check a design before anyone plays. A sensible first study: within players, counterbalanced gesture order, 8 to 10 players, about 3 sessions per gesture.
+**Sizing a study.** The uncertainty on a spread is about σ / √(2n). To see a 15 ms difference in spread between two gestures for one player (σ about 70 ms) you need about 100 jumps per gesture (n ≈ (σ / SE)², with SE of the difference about 7 ms). Run `gesture_lab/simulate_experiment.py` first to check a design before anyone plays. A sensible first study: within players, counterbalanced gesture order, 8 to 10 players, about 3 sessions per gesture.
 
 ## Methods beyond what exists
 
 - **Hierarchical Bayesian model.** Each player gets a bias and spread drawn from a population. With about 30 jumps per player it gives steadier estimates than separate fits, and it is how to test a gesture effect across players (PyMC, Stan or brms).
 - **Lapse rate.** Model misfires and misses as a separate probability so a few extreme early jumps stop inflating the spread. Standard in psychophysics; the third session suggested it (crashes on the widest windows, heavy tails).
 - **Model comparison.** Gaussian vs Student-t vs Gaussian plus lapses, compared by leave-one-out cross-validation instead of reading a QQ plot by eye.
-- **Bayesian adaptive design.** Choose the next obstacle height to maximize information about bias and spread (QUEST, the Psi method, expected information gain). `progressive.py` is a simple staircase; this would be its principled upgrade.
+- **Bayesian adaptive design.** Choose the next obstacle height to maximize information about bias and spread (QUEST, the Psi method, expected information gain). `gesture_lab/progressive.py` is a simple staircase; this would be its principled upgrade.
 - **Counterbalancing.** Randomize condition order across players (Latin square) so learning is not confused with a gesture effect.
 - **Effective window.** Report 4.13 x spread (the convention in pointing studies) so gestures compare fairly across target widths.
 - **Simulation-based power analysis.** Simulate the whole study, including the planned model, before collecting data.
@@ -52,7 +52,7 @@ The drift model's behavior (from a simulation of 200 sessions each, 31 jumps): i
 
 ## Known gaps
 
-- **Thumb gesture** is tuned on idealized synthetic hands. It needs a check with real hands (orientation, handedness, different thumbs); `THUMB_RISE_MIN` in `gesture_lib.py` is the knob.
+- **Thumb gesture** is tuned on idealized synthetic hands. It needs a check with real hands (orientation, handedness, different thumbs); `THUMB_RISE_MIN` in `gesture_lab/gesture_lib.py` is the knob.
 - **Progressive mode** is verified only with a scripted player; it needs a pilot with people to see whether it feels less repetitive than the fixed list.
 - **Delay still in the bias.** `delta_open` removes the stability wait and the average sampling wait. Still in it: the camera's internal delay and your movement time until the pose is recognised. A slow-motion video calibration (240 fps phone, hand and screen in one shot) would measure the camera part. Log the measured camera FPS in the trial header.
 - **Old logs.** Sessions recorded before commit `0901def` have wrong windows for tall obstacles; do not pool them.

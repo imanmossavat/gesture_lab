@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gesture-lab"
+version = "0.1.0"
+description = "Hand-gesture runner that measures how precisely a jump can be timed"
+requires-python = ">=3.10"
+dependencies = [
+    "mediapipe>=0.10.0",
+    "opencv-python>=4.8.0",
+    "pygame>=2.5.0",
+    "numpy>=1.26.0",
+    "matplotlib>=3.8.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0", "jupyter>=1.0.0"]
+
+[tool.setuptools]
+packages = ["gesture_lab"]

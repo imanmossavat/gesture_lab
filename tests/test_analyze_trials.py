@@ -6,9 +6,9 @@ import statistics
 
 import pytest
 
-import analyze_trials as at
-import experiment as ex
-import simulate_experiment as sim
+from gesture_lab import analyze_trials as at
+from gesture_lab import experiment as ex
+from gesture_lab import simulate_experiment as sim
 
 
 def _tagged(rows):

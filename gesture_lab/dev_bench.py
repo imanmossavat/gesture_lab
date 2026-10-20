@@ -4,12 +4,12 @@ This script does not open a window, a camera, or MediaPipe.  It exercises the
 pure-Python logic in ``adaptive.py`` and produces tables / plots for tuning.
 
 Examples:
-    python dev_bench.py feasibility
-    python dev_bench.py sweep
-    python dev_bench.py simulate --frames 3000 --latency 60
-    python dev_bench.py latency-report --output latency.png
-    python dev_bench.py compare --output compare.png
-    python dev_bench.py report
+    python -m gesture_lab.dev_bench feasibility
+    python -m gesture_lab.dev_bench sweep
+    python -m gesture_lab.dev_bench simulate --frames 3000 --latency 60
+    python -m gesture_lab.dev_bench latency-report --output latency.png
+    python -m gesture_lab.dev_bench compare --output compare.png
+    python -m gesture_lab.dev_bench report
 """
 import argparse
 import csv
@@ -21,7 +21,7 @@ import statistics
 import subprocess
 import sys
 
-from adaptive import (
+from gesture_lab.adaptive import (
     AdaptiveController,
     Config,
     OUTCOME_HEADER,

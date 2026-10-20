@@ -1,7 +1,7 @@
 """Tests for the HTML report: the maths helpers, the drift model, and the page."""
 import random
 
-from report_html import build_html, fit_drift, p_clear, window_for_rate, wilson
+from gesture_lab.report_html import build_html, fit_drift, p_clear, window_for_rate, wilson
 
 
 def _rows(n=24, speeds=(400.0,), seed=1, bias=-20.0, sigma=50.0):

@@ -7,8 +7,8 @@ sending the data files.
 
 Put this file in the repo root (next to adaptive.py), then:
 
-    python summarize.py data/*.csv
-    python summarize.py data/*.csv --trim-start 10 --anon --out summary.txt
+    python -m gesture_lab.summarize data/*.csv
+    python -m gesture_lab.summarize data/*.csv --trim-start 10 --anon --out summary.txt
 
 Handles both log types (detected from the header):
   outcomes : t_s, player, session, mode, d_spawn, d_after, speed, height,
@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from adaptive import Config, air_time, timing_window  # noqa: E402
+from gesture_lab.adaptive import Config, air_time, timing_window  # noqa: E402
 
 CFG = Config()
 BAND = 0.15          # "settled" = d stays within +-BAND of its late-session mean

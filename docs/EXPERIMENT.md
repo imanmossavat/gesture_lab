@@ -47,7 +47,7 @@ Terms used throughout:
 python game.py --experiment --log-trials data/alice_trials.csv --player alice
 
 # Read the result
-python analyze_trials.py data/alice_trials.csv --plot data/alice_report.png
+python -m gesture_lab.analyze_trials data/alice_trials.csv --plot data/alice_report.png
 ```
 
 What happens in the game:
@@ -59,7 +59,7 @@ What happens in the game:
 
 Useful options: `--experiment-speed 350`, `--experiment-blocks 6` (longer, more precise), `--experiment-seed 3` (repeat the same order).
 
-No camera? `python simulate_experiment.py --mu 0.03 --sigma 0.05 --out sim.csv` plays the same experiment with a simulated player whose bias (`--mu`) and spread (`--sigma`) you choose. Run the analysis on it and see whether the numbers come back. That is a good way to learn what the report looks like.
+No camera? `python -m gesture_lab.simulate_experiment --mu 0.03 --sigma 0.05 --out sim.csv` plays the same experiment with a simulated player whose bias (`--mu`) and spread (`--sigma`) you choose. Run the analysis on it and see whether the numbers come back. That is a good way to learn what the report looks like.
 
 ## 4. What is recorded
 
@@ -83,7 +83,7 @@ Two columns that look the same are deliberately separate: `predicted_success` co
 
 ## 5. Reading the report
 
-`analyze_trials.py` prints five numbered sections. Each ends with a short "What this means".
+`gesture_lab/analyze_trials.py` prints five numbered sections. Each ends with a short "What this means".
 
 ### 5.1 What was recorded
 How many obstacles you cleared, and **why** crashes happened. Too early and too late are timing errors. "No jump" means no jump started before the obstacle arrived.
@@ -122,8 +122,8 @@ The prediction in 5.4 assumes your timing errors follow a **bell curve** (a Gaus
 
 ## 6. What can go wrong with the measurement
 
-- **Few obstacles.** About 30 obstacles gives rough numbers. For a precise measurement, play two or three runs and pass all files to `analyze_trials.py` together.
-- **Frames.** A jump can only start on a frame boundary (every 17 ms), so measured bias runs about 8 ms late. The window itself is corrected for the game's frame-by-frame update (see the comments in `experiment.py`).
+- **Few obstacles.** About 30 obstacles gives rough numbers. For a precise measurement, play two or three runs and pass all files to `gesture_lab/analyze_trials.py` together.
+- **Frames.** A jump can only start on a frame boundary (every 17 ms), so measured bias runs about 8 ms late. The window itself is corrected for the game's frame-by-frame update (see the comments in `gesture_lab/experiment.py`).
 - **No jump.** If you never jump in time there is no timing to measure, so those obstacles are left out of bias and spread. A player who misses a lot looks slightly better than they are.
 - **Learning.** People improve during a session. Section 5.5 checks this.
 - **Gesture delay.** The camera and gesture recognition add their own delay (see `--log-latency`). Your measured bias includes it: bias = your habit + system delay.
@@ -132,11 +132,11 @@ The prediction in 5.4 assumes your timing errors follow a **bell curve** (a Gaus
 
 | File | Role |
 |---|---|
-| `jump_service.py` | the physics: safe window `[L, U]`, window to height, timing models |
-| `experiment.py` | the obstacle plan (`make_trials`), the recorder, the frame corrections |
-| `game.py` | `--experiment` and `--log-trials` |
-| `simulate_experiment.py` | a simulated player, no camera |
-| `analyze_trials.py` | the report and the picture |
+| `gesture_lab/jump_service.py` | the physics: safe window `[L, U]`, window to height, timing models |
+| `gesture_lab/experiment.py` | the obstacle plan (`make_trials`), the recorder, the frame corrections |
+| `gesture_lab/game.py` | `--experiment` and `--log-trials` |
+| `gesture_lab/simulate_experiment.py` | a simulated player, no camera |
+| `gesture_lab/analyze_trials.py` | the report and the picture |
 | `tests/test_experiment.py`, `tests/test_analyze_trials.py` | what the code is expected to do |
 
 The derivation of the window is in `dino_jump_success_model.md`.

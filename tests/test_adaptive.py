@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from adaptive import (
+from gesture_lab.adaptive import (
     AdaptiveController,
     Config,
     LATENCY_HEADER,
@@ -431,7 +431,7 @@ def test_next_spawn_timer_within_jitter_range():
 
 def test_wild_spawn_timer_is_feasible_bounded_and_keeps_mean():
     """Wild mode: never below the feasible minimum, bounded above, mean preserved."""
-    from adaptive import min_spawn_interval
+    from gesture_lab.adaptive import min_spawn_interval
     cfg = Config(SPAWN_GAP_MODE="wild")
     rng = random.Random(7)
     for d in (0.0, 0.5, 0.8, 1.0):
@@ -507,7 +507,7 @@ def test_set_preset_resets_controller_failures():
     """set_preset() resets the controller counters before applying the new preset."""
     pytest.importorskip("pygame")
     pytest.importorskip("cv2")
-    from game import GameState
+    from gesture_lab.game import GameState
 
     controller = AdaptiveController(Config())
     controller.update(0)
@@ -554,7 +554,7 @@ def test_game_outcomes_csv_and_analyze(tmp_path):
     assert len(rows) > 1
 
     analyze = subprocess.run(
-        ["python", "analyze.py", str(out)],
+        ["python", "-m", "gesture_lab.analyze", str(out)],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,
@@ -592,7 +592,7 @@ def test_analyze_per_session_and_combined_summary(tmp_path):
     csv_path.write_text("\n".join(lines) + "\n")
 
     result = subprocess.run(
-        ["python", "analyze.py", str(csv_path)],
+        ["python", "-m", "gesture_lab.analyze", str(csv_path)],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,
@@ -636,9 +636,9 @@ def test_preset_change_clears_obstacles():
     """A preset change must start a new session with no leftover obstacles."""
     pytest.importorskip("pygame")
     pytest.importorskip("cv2")
-    from game import GameState
-    from adaptive import PRESETS
-    from adaptive import AdaptiveController, Config, Obstacle
+    from gesture_lab.game import GameState
+    from gesture_lab.adaptive import PRESETS
+    from gesture_lab.adaptive import AdaptiveController, Config, Obstacle
 
     config = Config()
     controller = AdaptiveController(config)
@@ -666,8 +666,8 @@ def test_game_state_uses_config_geometry():
     """GameState geometry/physics must come from the passed Config."""
     pytest.importorskip("pygame")
     pytest.importorskip("cv2")
-    from game import GameState
-    from adaptive import AdaptiveController, Config
+    from gesture_lab.game import GameState
+    from gesture_lab.adaptive import AdaptiveController, Config
 
     cfg = Config(
         PLAYER_X=111.0, PLAYER_WIDTH=22.0, PLAYER_HEIGHT=33.0,
@@ -704,7 +704,7 @@ def test_analyze_multi_session_plot(tmp_path):
 
     plot_base = tmp_path / "report.png"
     result = subprocess.run(
-        ["python", "analyze.py", str(csv_path), "--plot", str(plot_base), "--window", "10", "--tail", "10"],
+        ["python", "-m", "gesture_lab.analyze", str(csv_path), "--plot", str(plot_base), "--window", "10", "--tail", "10"],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,
@@ -727,7 +727,7 @@ def test_dev_bench_simulate_writes_metadata(tmp_path):
     csv_path = tmp_path / "sim.csv"
     result = subprocess.run(
         [
-            "python", "dev_bench.py", "simulate",
+            "python", "-m", "gesture_lab.dev_bench", "simulate",
             "--frames", "200", "--noise", "60", "--latency", "50", "--miss", "0.05",
             "--start-d", "0.2", "--adaptation-rate", "0.06", "--target-success-rate", "0.8",
             "--momentum", "0.5",
@@ -754,7 +754,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
     csv_path = tmp_path / "sim.csv"
     subprocess.run(
         [
-            "python", "dev_bench.py", "simulate",
+            "python", "-m", "gesture_lab.dev_bench", "simulate",
             "--frames", "200", "--adaptation-rate", "0.06", "--target-success-rate", "0.8",
             "--momentum", "0.5",
             "--csv", str(csv_path),
@@ -766,7 +766,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
     )
 
     analyze = subprocess.run(
-        ["python", "analyze.py", str(csv_path)],
+        ["python", "-m", "gesture_lab.analyze", str(csv_path)],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,
@@ -778,7 +778,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
     assert "TARGET_SUCCESS_RATE = 0.8" in analyze.stdout
 
     summarize = subprocess.run(
-        ["python", "summarize.py", str(csv_path)],
+        ["python", "-m", "gesture_lab.summarize", str(csv_path)],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,
@@ -791,7 +791,7 @@ def test_analyze_and_summarize_read_metadata(tmp_path):
 
 def test_simulate_returns_obstacle_rows():
     """_simulate now returns per-obstacle rows, not just outcome integers."""
-    from dev_bench import _simulate
+    from gesture_lab.dev_bench import _simulate
     cfg = Config()
     rng = random.Random(7)
     controller, rows = _simulate(
@@ -841,7 +841,7 @@ def test_dev_bench_simulate_header_matches_constant(tmp_path):
     """dev_bench simulate --csv writes the exact OUTCOME_HEADER columns."""
     csv_path = tmp_path / "rep.csv"
     result = subprocess.run(
-        ["python", "dev_bench.py", "simulate", "--frames", "10", "--csv", str(csv_path)],
+        ["python", "-m", "gesture_lab.dev_bench", "simulate", "--frames", "10", "--csv", str(csv_path)],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,
@@ -957,13 +957,13 @@ def test_summarize_rest_table_flags_a_recovery_penalty(tmp_path):
     _write_rest_csv(no_penalty, rng, penalty_below_s=0.0)
     root = Path(__file__).resolve().parent.parent
 
-    r1 = subprocess.run(["python", "summarize.py", str(with_penalty)], cwd=str(root),
+    r1 = subprocess.run(["python", "-m", "gesture_lab.summarize", str(with_penalty)], cwd=str(root),
                         capture_output=True, text=True)
     assert r1.returncode == 0, r1.stderr
     assert "success by rest time" in r1.stdout
     assert "<< below model" in r1.stdout
 
-    r2 = subprocess.run(["python", "summarize.py", str(no_penalty)], cwd=str(root),
+    r2 = subprocess.run(["python", "-m", "gesture_lab.summarize", str(no_penalty)], cwd=str(root),
                         capture_output=True, text=True)
     assert r2.returncode == 0, r2.stderr
     assert "success by rest time" in r2.stdout
@@ -981,7 +981,7 @@ def test_summarize_skips_rest_table_without_gap_column(tmp_path):
             r.pop("gap_s")
             w.writerow(r)
     root = Path(__file__).resolve().parent.parent
-    r = subprocess.run(["python", "summarize.py", str(p)], cwd=str(root),
+    r = subprocess.run(["python", "-m", "gesture_lab.summarize", str(p)], cwd=str(root),
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert "success by rest time" not in r.stdout
@@ -990,7 +990,7 @@ def test_summarize_skips_rest_table_without_gap_column(tmp_path):
 def test_fixed_steps_keeps_game_time_equal_to_real_time():
     """Whatever the camera frame time, physics runs in whole 1/60 s steps and
     game time never drifts from real time by more than one step."""
-    from adaptive import fixed_steps
+    from gesture_lab.adaptive import fixed_steps
 
     step = 1.0 / 60.0
     for frame_s in (1 / 30, 1 / 60, 1 / 45, 0.025, 0.05):

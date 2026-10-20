@@ -10,8 +10,8 @@ No camera, no window.  Useful for three things:
    bias and spread), so you can see whether the analysis recovers it.
 
 Example:
-    python simulate_experiment.py --mu 0.02 --sigma 0.05 --out sim_trials.csv
-    python analyze_trials.py sim_trials.csv --plot sim.png
+    python -m gesture_lab.simulate_experiment --mu 0.02 --sigma 0.05 --out sim_trials.csv
+    python -m gesture_lab.analyze_trials sim_trials.csv --plot sim.png
 
 The simulated player knows the window and aims at its centre with a random
 error:   t_j = centre + mu + N(0, sigma^2).
@@ -24,10 +24,10 @@ import csv
 import random
 import sys
 
-from adaptive import (
+from gesture_lab.adaptive import (
     AdaptiveController, Config, attempt_jump, resolve_obstacles,
 )
-import experiment as ex
+from gesture_lab import experiment as ex
 
 DT = 1.0 / 60.0  # the game runs at 60 frames per second
 
