@@ -1,5 +1,7 @@
 # Gesture Lab
 
+[![tests](https://github.com/imanmossavat/gesture_lab/actions/workflows/tests.yml/badge.svg)](https://github.com/imanmossavat/gesture_lab/actions/workflows/tests.yml)
+
 A hand-controlled runner that doubles as a small experiment: how precisely can you time a jump with a hand gesture? Play it, then get a report on your own timing. Needs a webcam and Python 3.10 to 3.13.
 
 ## Quick start
@@ -54,6 +56,7 @@ The key numbers are **bias** (early or late?) and **spread** (how scattered?). B
 
 - **One file per session**, with a new name each time. Reusing a name overwrites the old file.
 - **Same seed to compare players** (`--experiment-seed`); a new seed for repeat sessions of one player, so the order cannot be learned.
+- **Choose the gesture at start:** `--gesture open` (the default) or `--gesture thumb`; there is no in-game switch. The log header records it. Put it in the file name and analyze each gesture separately, because `analyze_trials.py` pools whatever files it is given. Compare gestures by spread, not bias: each has its own delay.
 - **Same preset for everyone** (`--preset`). It sets how many frames a gesture must be held, which adds delay.
 - Camera speed (a 30 FPS webcam is fine) only changes when a gesture is noticed, never the windows: physics runs at a fixed 1/60 s. Compare biases only on the same setup (see `AGENTS.md`, Timing).
 - Logs made before physics ran at a fixed 1/60 s are not comparable for tall obstacles; the header's `git_hash` says which code wrote a file.

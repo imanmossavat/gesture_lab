@@ -521,6 +521,13 @@ def test_set_preset_resets_controller_failures():
     assert state.preset_id == 2
 
 
+def _require_game_ran(result):
+    """The headless game run needs the hand model (one download). Skip, don't fail, without it."""
+    if result.returncode != 0 and "hand_landmarker.task" in result.stderr:
+        pytest.skip("hand model not available (needs one download)")
+    assert result.returncode == 0, result.stderr
+
+
 def test_game_outcomes_csv_and_analyze(tmp_path):
     """Smoke-run the game with --log-outcomes and consume the log with analyze.py."""
     pytest.importorskip("pygame")
@@ -536,7 +543,7 @@ def test_game_outcomes_csv_and_analyze(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    _require_game_ran(result)
     text = out.read_text()
     header = ",".join(OUTCOME_HEADER)
     assert header in text, text[:200]
@@ -860,7 +867,7 @@ def test_game_latency_header_matches_constant(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    _require_game_ran(result)
     lines = out.read_text().splitlines()
     header_line = next(line for line in lines if not line.startswith("#"))
     assert header_line == ",".join(LATENCY_HEADER)

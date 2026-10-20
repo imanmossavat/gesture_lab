@@ -1,0 +1,25 @@
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    env:
+      SDL_VIDEODRIVER: dummy     # pygame without a display
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: System library OpenCV needs
+        run: sudo apt-get update && sudo apt-get install -y libgl1
+      - name: Cache the hand model (downloaded once on first use)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fontys_gesture_lab
+          key: hand-model-v1
+      - run: pip install -r requirements.txt
+      - run: pytest -q
