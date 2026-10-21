@@ -11,3 +11,4 @@ venv/
 !data/valid/*.csv
 *.egg-info/
 build/
+.vscode/settings.json
