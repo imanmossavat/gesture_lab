@@ -29,6 +29,7 @@ from gesture_lab.adaptive import (
     air_time,
     apex_time,
     clears_obstacle,
+    design_margin_height,
     difficulty_profile,
     jump_peak,
     timing_window,
@@ -164,7 +165,7 @@ def cmd_feasibility(args: argparse.Namespace) -> int:
     for d in (0.0, 0.25, 0.5, 0.75, 1.0):
         profile = difficulty_profile(d, cfg)
         # Design-margin height with +2σ jitter.
-        h = profile.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
+        h = design_margin_height(profile, cfg)
         if args.gap_mode == "schedule":
             jitter_min = cfg.SPAWN_INTERVAL_JITTER_MEAN - 2.0 * cfg.SPAWN_INTERVAL_JITTER_STD
             gap_px = profile.speed * profile.spawn_interval * jitter_min - profile.width
@@ -230,7 +231,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     budgets_ms: list[tuple[float, float]] = []
     for d in ds:
         prof = difficulty_profile(d, cfg)
-        h = prof.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
+        h = design_margin_height(prof, cfg)
         window = timing_window(h, prof.width, prof.speed, cfg)
         half_ms = 0.5 * window * 1000.0
         budgets_ms.append((d, half_ms))
@@ -275,7 +276,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     d = 0.0
     while d <= 1.0001:
         profile = difficulty_profile(d, cfg)
-        h = profile.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)
+        h = design_margin_height(profile, cfg)
         margin = timing_window(h, profile.width, profile.speed, cfg)
         print(
             f"{d:4.2f} {profile.speed:6.1f} {h:6.1f} {profile.width:6.1f} "
@@ -559,10 +560,97 @@ def build_parser() -> argparse.ArgumentParser:
     p_play = sub.add_parser("play", help="note about interactive play")
     p_play.set_defaults(func=cmd_play)
 
+    p_knob = sub.add_parser("knob", help="legacy vs window difficulty mapping, simulated players")
+    p_knob.add_argument("--sigmas", type=float, nargs="+", default=[30, 45, 60, 80, 100],
+                        help="player timing spreads to test, in ms")
+    p_knob.add_argument("--mu", type=float, default=0.0, help="timing bias in seconds (+ = late)")
+    p_knob.add_argument("--lapse", type=float, default=0.03, help="share of obstacles failed regardless")
+    p_knob.add_argument("--trials", type=int, default=60, help="obstacles per session")
+    p_knob.add_argument("--sessions", type=int, default=200, help="sessions per cell")
+    p_knob.set_defaults(func=cmd_knob)
+
     p_rep = sub.add_parser("report", help="print regenerable design tables")
     p_rep.set_defaults(func=cmd_report)
 
     return parser
+
+
+# ---------------------------------------------------------------------------
+# knob: does the d controller reach the target, legacy vs window mapping?
+# ---------------------------------------------------------------------------
+
+def knob_session(cfg: Config, sigma: float, mu: float = 0.0, lapse: float = 0.03,
+                 n: int = 60, seed: int = 0) -> list[tuple[float, int, float]]:
+    """One simulated session of the d controller.
+
+    The player times each jump as  t_j = window centre + mu + N(0, sigma^2)
+    and on a fraction ``lapse`` of obstacles fails regardless (gesture misfire,
+    distraction).  Windows are the game-scored windows (``game_window``), so the
+    simulation uses the same physics as the game.  Returns (d, outcome, W) rows.
+    """
+    from gesture_lab.adaptive import randomize_height
+    from gesture_lab.experiment import game_window
+
+    rng = random.Random(seed)
+    controller = AdaptiveController(cfg, rng=rng)
+    rows = []
+    for _ in range(n):
+        d = controller.d
+        profile = difficulty_profile(d, cfg)
+        h = randomize_height(profile, rng, cfg)
+        gap = profile.speed * profile.spawn_interval - profile.width
+        window = game_window(h, profile.width, profile.speed, gap, cfg)
+        if not window.feasible or rng.random() < lapse:
+            outcome = 0
+        else:
+            t_j = window.centre + mu + rng.gauss(0.0, sigma)
+            outcome = int(window.L <= t_j <= window.U)
+        rows.append((d, outcome, window.width if window.feasible else 0.0))
+        controller.update(outcome)
+    return rows
+
+
+def matched_window(sigma: float, lapse: float, target: float) -> float:
+    """Window (s) where a centred Gaussian player with lapses clears ``target``."""
+    timing = target / (1.0 - lapse)          # success needed when not lapsing
+    if timing >= 1.0:
+        return math.inf
+    lo, hi = 1e-4, 5.0
+    for _ in range(80):                      # bisection on 2*Phi(W/2s) - 1
+        mid = 0.5 * (lo + hi)
+        p = math.erf(mid / (2.0 * sigma * math.sqrt(2.0)))
+        lo, hi = (mid, hi) if p < timing else (lo, mid)
+    return 0.5 * (lo + hi)
+
+
+def cmd_knob(args) -> int:
+    sigmas = [s / 1000.0 for s in args.sigmas]
+    print(f"d controller, target {Config().TARGET_SUCCESS_RATE:.0%}, {args.trials} obstacles, "
+          f"{args.sessions} sessions per cell, lapse {args.lapse:.0%}, bias {args.mu * 1000:.0f} ms")
+    print("Clear rate is measured over obstacles 21..end (after settling).")
+    print()
+    header = (f"{'spread':>7} | {'needs W':>8} | {'mode':>6} | {'clear rate':>10} | "
+              f"{'final W':>8} | {'at d=1':>6}")
+    print(header)
+    print("-" * len(header))
+    for sigma in sigmas:
+        need = matched_window(sigma, args.lapse, Config().TARGET_SUCCESS_RATE)
+        for mode in ("legacy", "window"):
+            cfg = Config(DIFFICULTY_MODE=mode)
+            rates, final_w, ceiling = [], [], []
+            for s in range(args.sessions):
+                rows = knob_session(cfg, sigma, args.mu, args.lapse, args.trials, seed=s)
+                tail = rows[20:]
+                rates.append(sum(o for _, o, _ in tail) / len(tail))
+                final_w.append(statistics.median(w for _, _, w in rows[-10:]))
+                ceiling.append(sum(d >= cfg.D_MAX - 1e-9 for d, _, _ in tail) / len(tail))
+            print(f"{sigma * 1000:5.0f}ms | {need * 1000:6.0f}ms | {mode:>6} | "
+                  f"{statistics.mean(rates):9.0%}  | {statistics.median(final_w) * 1000:6.0f}ms | "
+                  f"{statistics.mean(ceiling):5.0%}")
+    print()
+    print("'needs W' is the window where this player would clear the target.")
+    print("'at d=1' is the share of obstacles played at the hardest setting.")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -6,6 +6,7 @@ import csv
 import math
 import os
 import random
+import statistics
 import subprocess
 from pathlib import Path
 
@@ -41,19 +42,20 @@ from gesture_lab.adaptive import (
 # ---------------------------------------------------------------------------
 
 def test_profile_at_difficulty_boundaries():
-    p0 = difficulty_profile(0.0)
+    legacy = Config(DIFFICULTY_MODE="legacy")
+    p0 = difficulty_profile(0.0, legacy)
     assert p0.speed == pytest.approx(260.0)
     assert p0.height == pytest.approx(30.0)
     assert p0.width == pytest.approx(20.0)
     assert p0.spawn_interval == pytest.approx(2.5)
 
-    p1 = difficulty_profile(1.0)
+    p1 = difficulty_profile(1.0, legacy)
     assert p1.speed == pytest.approx(550.0)
     assert p1.height == pytest.approx(90.0)
     assert p1.width == pytest.approx(50.0)
     assert p1.spawn_interval == pytest.approx(1.3)
 
-    p5 = difficulty_profile(0.5)
+    p5 = difficulty_profile(0.5, legacy)
     assert p5.speed == pytest.approx(405.0)
     assert p5.height == pytest.approx(60.0)
     assert p5.width == pytest.approx(35.0)
@@ -72,7 +74,7 @@ def test_profile_clamps_out_of_range_d():
 # ---------------------------------------------------------------------------
 
 def test_success_and_failure_deltas():
-    c = AdaptiveController()
+    c = AdaptiveController(Config(D_START=0.5))
     c.update(1)
     assert c.d == pytest.approx(0.52)  # +0.02
     c.update(0)
@@ -80,7 +82,7 @@ def test_success_and_failure_deltas():
 
 
 def test_zero_momentum_matches_original_update():
-    c = AdaptiveController(Config(MOMENTUM=0.0))
+    c = AdaptiveController(Config(MOMENTUM=0.0, D_START=0.5))
     for outcome, expected in [(1, 0.52), (0, 0.46), (1, 0.48)]:
         c.update(outcome)
         assert c.d == pytest.approx(expected)
@@ -98,7 +100,7 @@ def test_momentum_first_step_matches_plain_update_then_keeps_moving():
 
 
 def test_momentum_carries_through_after_streak_ends():
-    c = AdaptiveController(Config(MOMENTUM=0.8))
+    c = AdaptiveController(Config(MOMENTUM=0.8, D_START=0.5))
     for _ in range(3):  # keep d away from the lower bound
         c.update(0)
     d_before = c.d
@@ -239,7 +241,7 @@ def test_spawn_returns_none_when_gap_too_small():
 def test_spawn_returns_obstacle_when_allowed():
     cfg = Config()
     rng = random.Random(1)
-    profile = difficulty_profile(0.0, cfg)
+    profile = difficulty_profile(0.5, cfg)
     ob = try_spawn(None, profile, profile.speed, rng, cfg)
     assert ob is not None
     assert ob.x == pytest.approx(cfg.SPAWN_X)
@@ -358,7 +360,9 @@ def test_feasibility_at_extremes_with_height_jitter():
 # ---------------------------------------------------------------------------
 
 def _run_simulation(seed, n, timing_noise_ms, latency_jitter_ms, miss_prob, skill_bias_ms=0.0):
-    cfg = Config()
+    # Legacy knob: this helper jitters height directly and was tuned for it.
+    # The window knob has its own simulation test below.
+    cfg = Config(DIFFICULTY_MODE="legacy")
     rng = random.Random(seed)
     c = AdaptiveController(cfg, rng=random.Random(seed))
     outcomes = []
@@ -487,7 +491,7 @@ def test_on_outcome_callback_receives_single_event():
 
 def test_feasibility_schedule_slack_values():
     """Schedule-mode slacks use the design-margin jitter floor and match pinned values."""
-    cfg = Config()
+    cfg = Config(DIFFICULTY_MODE="legacy")
     jitter_floor = cfg.SPAWN_INTERVAL_JITTER_MEAN - 2.0 * cfg.SPAWN_INTERVAL_JITTER_STD
     expected = {
         0.00: 1.3064,
@@ -1000,3 +1004,74 @@ def test_fixed_steps_keeps_game_time_equal_to_real_time():
             steps += n
             assert abs(steps * step - i * frame_s) <= step + 1e-9
         assert 0.0 <= accum < step + 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Window difficulty mode (the default knob)
+# ---------------------------------------------------------------------------
+
+def test_window_mode_is_default_and_log_scaled():
+    from gesture_lab.adaptive import window_for_d, d_for_window
+    cfg = Config()
+    assert cfg.DIFFICULTY_MODE == "window"
+    assert window_for_d(0.0, cfg) == pytest.approx(cfg.WINDOW_EASY_S)
+    assert window_for_d(1.0, cfg) == pytest.approx(cfg.WINDOW_HARD_S)
+    # Log scale: the midpoint is the geometric mean.
+    assert window_for_d(0.5, cfg) == pytest.approx(
+        math.sqrt(cfg.WINDOW_EASY_S * cfg.WINDOW_HARD_S))
+    for d in (0.0, 0.2, 0.7, 1.0):
+        assert d_for_window(window_for_d(d, cfg), cfg) == pytest.approx(d)
+
+
+def test_window_mode_profile_gives_the_target_window():
+    """The game-scored window of the nominal obstacle equals W(d)."""
+    from gesture_lab.experiment import game_window
+    cfg = Config()
+    for d in (0.0, 0.25, 0.5, 0.75, 1.0):
+        p = difficulty_profile(d, cfg)
+        gap = p.speed * p.spawn_interval - p.width
+        w = game_window(p.height, p.width, p.speed, gap, cfg)
+        assert w.feasible
+        assert w.U == pytest.approx(w.U_clear)          # clearance binds
+        assert w.width == pytest.approx(p.window, abs=1e-6)
+
+
+def test_window_mode_jittered_obstacles_are_always_feasible():
+    from gesture_lab.adaptive import randomize_height
+    from gesture_lab.experiment import game_window
+    cfg = Config()
+    rng = random.Random(3)
+    for d in (0.0, 0.5, 0.9, 1.0):
+        p = difficulty_profile(d, cfg)
+        gap = p.speed * p.spawn_interval - p.width
+        widths = []
+        for _ in range(300):
+            w = game_window(randomize_height(p, rng, cfg), p.width, p.speed, gap, cfg)
+            assert w.feasible
+            widths.append(w.width)
+        assert min(widths) >= 0.8 * cfg.WINDOW_HARD_S - 1e-9
+        assert statistics.median(widths) == pytest.approx(p.window, rel=0.1)
+
+
+def test_legacy_mode_cannot_reach_the_target_but_window_mode_can():
+    """The reason for the window knob: legacy d saturates for typical players."""
+    from gesture_lab.dev_bench import knob_session, matched_window
+    sigma, lapse = 0.06, 0.03
+    results = {}
+    for mode in ("legacy", "window"):
+        cfg = Config(DIFFICULTY_MODE=mode)
+        rates, final_w = [], []
+        for seed in range(40):
+            rows = knob_session(cfg, sigma, 0.0, lapse, 80, seed=seed)
+            rates.append(sum(o for _, o, _ in rows[30:]) / len(rows[30:]))
+            final_w.append(statistics.median(w for _, _, w in rows[-10:]))
+        results[mode] = (statistics.mean(rates), statistics.median(final_w))
+    need = matched_window(sigma, lapse, Config().TARGET_SUCCESS_RATE)
+    assert results["legacy"][0] > 0.88                       # far above 75 %
+    assert 0.70 <= results["window"][0] <= 0.80
+    assert results["window"][1] == pytest.approx(need, rel=0.15)
+
+
+def test_unknown_difficulty_mode_raises():
+    with pytest.raises(ValueError):
+        difficulty_profile(0.5, Config(DIFFICULTY_MODE="nope"))

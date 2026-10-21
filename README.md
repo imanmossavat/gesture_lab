@@ -83,7 +83,11 @@ Docs: [EXPERIMENT.md](docs/EXPERIMENT.md) (what is measured), [FUTURE.md](docs/F
 
 ## Classic adaptive mode
 
-Without `--experiment` or `--progressive`, a controller adapts one difficulty number `d` to your success rate. It is fun for a few runs but settles into a rhythm, which is why the experiment modes exist.
+Without `--experiment` or `--progressive`, a controller adapts one difficulty number `d` to your success rate (target 75 %).
+
+`d` sets the width of the **safe jump window**, on a log scale from 450 ms (`d = 0`) to 50 ms (`d = 1`). The obstacle height is solved from that window with the game's own physics, so `d` is the timing precision you need, and every obstacle is feasible. Speed only rises a little (380 to 460 px/s), because a faster game actually widens the window.
+
+The old mapping (`Config(DIFFICULTY_MODE="legacy")`) scaled speed, height and width together. Its hardest setting was a 236 ms window, which a typical player clears 86 to 100 % of the time, so the controller sat at `d = 1`. `python -m gesture_lab.dev_bench knob` shows both mappings side by side.
 
 ```bash
 python game.py --log-outcomes data/alice.csv --log-latency data/alice_latency.csv --player alice --max-crashes 0
@@ -97,9 +101,9 @@ After `--max-crashes N` (default 3) the game stops and shows stats; `0` disables
 
 | Preset | d | Stability | Threshold |
 |---|---|---|---|
-| easy | 0.80 | 1 | 0.50 |
-| normal | 0.94 | 2 | 0.60 |
-| hard | 1.00 | 3 | 0.70 |
+| easy | 0.15 | 1 | 0.50 |
+| normal | 0.30 | 2 | 0.60 |
+| hard | 0.45 | 3 | 0.70 |
 
 A preset sets the starting `d`, the confidence threshold, and the stability (consecutive frames a gesture must be held to count as a jump). Only `d` then adapts.
 

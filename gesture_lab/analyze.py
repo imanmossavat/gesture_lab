@@ -129,14 +129,14 @@ def design_margins():
     """Timing budget per difficulty, from the game's own physics (adaptive.py)."""
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from gesture_lab.adaptive import Config, difficulty_profile, timing_window
+        from gesture_lab.adaptive import Config, design_margin_height, difficulty_profile, timing_window
     except Exception:
         return None
     cfg = Config()
     out = []
     for d in (0.0, 0.5, 1.0):
         p = difficulty_profile(d, cfg)
-        h = p.height * (cfg.HEIGHT_JITTER_MEAN + 2.0 * cfg.HEIGHT_JITTER_STD)  # +2σ jittered obstacle
+        h = design_margin_height(p, cfg)  # +2σ 'hard draw' obstacle
         window = timing_window(h, p.width, p.speed, cfg) * 1000.0
         out.append((d, window, 0.5 * window))         # clears_obstacle allows +-half
     return out
