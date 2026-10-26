@@ -120,3 +120,44 @@ def test_old_logs_without_delta_open_still_work():
     assert at.timing_key(rows) == "delta"
     _, text = _report(rows)
     assert "later on average" not in text
+
+
+def test_load_trials_reads_gesture_and_session_from_the_header(tmp_path):
+    path = tmp_path / "t.csv"
+    path.write_text("# gesture=thumb\n# experiment=1\n# progressive=1\n"
+                    "trial,W,outcome\n0,0.2,1\n")
+    rows = at.load_trials([str(path)])
+    assert rows[0]["_gesture"] == "thumb" and rows[0]["_mode"] == "progressive"
+    assert at.session_label(rows) == "thumb gesture, progressive session"
+    assert at.gesture_action(rows) == "raising your thumb"
+
+
+def test_old_logs_without_a_gesture_get_neutral_wording(tmp_path):
+    path = tmp_path / "t.csv"
+    path.write_text("trial,W,outcome\n0,0.2,1\n")
+    rows = at.load_trials([str(path)])
+    assert at.session_label(rows) == "" and at.gesture_action(rows) == "the gesture"
+
+
+def test_advice_uses_the_game_clock_not_the_camera_clock():
+    rows = _tagged(sim.simulate(seed=3, blocks=6, mu=0.0, sigma=0.04))
+    for r in rows:                     # camera saw every gesture 57 ms before the game jumped
+        if r["delta"] not in ("", None):
+            r["delta_open"] = str(float(r["delta"]) - 0.057)
+        r["_gesture"] = "thumb"
+    out, text = _report(rows)
+    assert out["mu"] < -0.04 and abs(out["game_mu"]) < 0.015
+    assert "well centred" in text and "later." not in text
+    assert at.timing_advice(-48, "raising your thumb") == "Try raising your thumb about 48 ms later."
+
+
+def test_staircase_windows_are_grouped_instead_of_one_row_each():
+    rows = []
+    for i in range(33):                # every obstacle has its own designed width
+        w = 0.09 + i * 0.01
+        rows.append({"W": str(w), "target_w": str(w), "outcome": str(int(i % 4 != 0))})
+    table = at.success_by_window(rows, None)
+    assert 3 <= len(table) <= 7
+    assert all(t["n"] >= 4 for t in table) and sum(t["n"] for t in table) == 33
+    widths = [t["mean_w"] for t in table]
+    assert widths == sorted(widths, reverse=True)

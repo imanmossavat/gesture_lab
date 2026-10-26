@@ -25,7 +25,8 @@ import statistics
 import sys
 from typing import Optional, Sequence
 
-from gesture_lab.analyze_trials import _flag, _num, load_trials
+from gesture_lab.analyze_trials import (_flag, _num, gesture_action, load_trials, session_label,
+                                        timing_advice)
 
 # ---------------------------------------------------------------------------
 # Small maths helpers (milliseconds everywhere in this file)
@@ -248,11 +249,13 @@ def build_html(rows: Sequence[dict]) -> str:
     all_ws = [{"W": _num(r, "W") * 1000, "ok": _flag(r, "outcome")} for r in feasible]
     n_ok = sum(_flag(r, "outcome") for r in rows)
     who = ", ".join(sorted({r.get("player", "") for r in rows if r.get("player")})) or "player"
-    parts = [f"<h1>Jump timing report: {html.escape(who)}</h1>",
+    label = session_label(rows)
+    title = f"Jump timing report: {who}" + (f" ({label})" if label else "")
+    parts = [f"<h1>{html.escape(title)}</h1>",
              f'<p class="mut">{len(rows)} obstacles, {len(jumps)} jumps measured, from {html.escape(", ".join(sorted({r["_source"] for r in rows})))}.</p>']
     if len(jumps) < 8:
         parts.append("<p>Fewer than 8 measured jumps: play a longer session before reading anything into the numbers.</p>")
-        return _page("".join(parts))
+        return _page("".join(parts), title)
 
     deltas = [j["delta"] for j in jumps]          # when the game started each jump: decides the outcome
     mu_g, sigma_g = statistics.fmean(deltas), statistics.stdev(deltas)
@@ -266,18 +269,19 @@ def build_html(rows: Sequence[dict]) -> str:
 
     parts.append('<div class="cards">'
                  f'<div class="card">cleared<b>{n_ok}/{len(rows)}</b>{100 * n_ok / len(rows):.0f}%</div>'
-                 f'<div class="card">bias<b>{mu:+.0f} ms</b>±{se_mu:.0f} ({"early" if mu < 0 else "late"})</div>'
+                 f'<div class="card">jump start<b>{mu_g:+.0f} ms</b>{"early" if mu_g < 0 else "late"}, game clock</div>'
+                 f'<div class="card">bias{" (camera)" if corrected else ""}<b>{mu:+.0f} ms</b>±{se_mu:.0f}</div>'
                  f'<div class="card">spread<b>{sigma:.0f} ms</b>±{se_sig:.0f}</div>'
                  f'<div class="card">physics check<b>{pc}/{pj}</b>outcomes predicted</div></div>')
-    tip = ("Wait a beat before opening your hand." if mu < -15 else
-           "Open your hand a little sooner." if mu > 15 else "Your timing is well centred on average.")
+    tip = timing_advice(mu_g, gesture_action(rows))       # TIMING: the game clock decides clear or crash
+    parts.append(f"<p>The game started your jumps <b>{abs(mu_g):.0f} ms {'early' if mu_g < 0 else 'late'}</b> on average, "
+                 f"relative to the middle of the safe window, and about two out of three of your jumps land within "
+                 f"<b>{sigma:.0f} ms</b> of your own average. {tip}</p>")
     if corrected:
-        parts.append("<p class=\"mut\">Bias and spread are your timing from when the camera first saw your gesture "
+        parts.append("<p class=\"mut\">Bias and spread are timed from when the camera first saw your gesture "
                      f"(minus half a camera frame), so the game's own wait is removed. The game then started your jumps "
-                     f"{mu_g - mu:.0f} ms later on average, and that later time decides clear or crash, so the first chart "
-                     "and the success curve use it.</p>")
-    parts.append(f"<p>On average your jumps land <b>{abs(mu):.0f} ms {'early' if mu < 0 else 'late'}</b> relative to the middle "
-                 f"of the safe window, and about two out of three land within <b>{sigma:.0f} ms</b> of your own average. {tip}</p>")
+                     f"{mu_g - mu:.0f} ms later on average, and that later time decides clear or crash, so the advice, "
+                     "the first chart and the success curve use it.</p>")
 
     parts.append("<h2>Every jump against its safe window</h2>"
                  '<p class="mut">Each pale bar is one obstacle\'s safe window; the dot is where you jumped (green cleared, red crashed). '
@@ -311,12 +315,12 @@ def build_html(rows: Sequence[dict]) -> str:
                      '<p class="mut">The last column is the narrowest safe window you would clear 70% of the time at that speed.</p>')
     parts.append('<p class="mut">Bias includes camera and detection delay, so it describes this player on this setup. '
                  "Numbers after ± are one standard error.</p>")
-    return _page("".join(parts))
+    return _page("".join(parts), title)
 
 
-def _page(body: str) -> str:
+def _page(body: str, title: str = "Jump timing report") -> str:
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width,initial-scale=1"><title>Jump timing report</title>'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title>'
             f"<style>{CSS}</style></head><body><main>{body}</main></body></html>")
 
 

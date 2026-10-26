@@ -66,3 +66,17 @@ def test_page_explains_the_two_clocks_when_delta_open_is_present():
     page = build_html(rows)
     assert "later on average" in page and "50 ms later" in page
     assert "later on average" not in build_html(_rows())
+
+
+def test_advice_and_title_follow_the_gesture_and_the_game_clock():
+    rows = _rows(n=30, bias=0.0, sigma=40.0)
+    for r in rows:
+        r["delta_open"] = str(float(r["delta"]) - 0.057)
+        r["_gesture"], r["_mode"] = "thumb", "progressive"
+    page = build_html(rows)
+    assert "opening your hand" not in page and "Wait a beat" not in page
+    assert "(thumb gesture, progressive session)</title>" in page
+    late = _rows(n=30, bias=-60.0, sigma=20.0)
+    for r in late:
+        r["_gesture"] = "thumb"
+    assert "Try raising your thumb about" in build_html(late)

@@ -54,15 +54,55 @@ FRAME_MS = 1000.0 / 60.0            # one game frame, used as the physics tolera
 # ---------------------------------------------------------------------------
 
 def load_trials(paths: Sequence[str]) -> list[dict]:
-    """Read trial CSVs.  Lines starting with ``#`` are metadata and are skipped."""
+    """Read trial CSVs.  Lines starting with ``#`` are metadata (``# key=value``).
+
+    Each row gets ``_source`` (file name), ``_gesture`` (``open``/``thumb``, empty in
+    old logs) and ``_mode`` (``experiment``/``progressive``/``adaptive``, or empty).
+    """
     rows: list[dict] = []
     for path in paths:
+        meta: dict[str, str] = {}
+        data_lines = []
         with open(path, newline="") as f:
-            data_lines = (line for line in f if not line.startswith("#"))
-            for row in csv.DictReader(data_lines):
-                row["_source"] = Path(path).name
-                rows.append(row)
+            for line in f:
+                if line.startswith("#"):
+                    key, sep, value = line[1:].strip().partition("=")
+                    if sep:
+                        meta[key.strip()] = value.strip()
+                else:
+                    data_lines.append(line)
+        mode = ("progressive" if meta.get("progressive") == "1" else
+                "experiment" if meta.get("experiment") == "1" else
+                "adaptive" if meta.get("experiment") == "0" else "")
+        for row in csv.DictReader(data_lines):
+            row["_source"] = Path(path).name
+            row["_gesture"] = meta.get("gesture", "")
+            row["_mode"] = mode
+            rows.append(row)
     return rows
+
+
+GESTURE_ACTION = {"open": "opening your hand", "thumb": "raising your thumb"}
+
+
+def gesture_action(rows: Sequence[dict]) -> str:
+    """How to name the jump gesture in advice: the log's gesture, or a neutral phrase."""
+    gestures = {r.get("_gesture") for r in rows if r.get("_gesture")}
+    return GESTURE_ACTION.get(gestures.pop(), "the gesture") if len(gestures) == 1 else "the gesture"
+
+
+def session_label(rows: Sequence[dict]) -> str:
+    """For example 'thumb gesture, progressive session'; empty for old logs."""
+    gestures = sorted({r["_gesture"] for r in rows if r.get("_gesture")})
+    modes = sorted({r["_mode"] for r in rows if r.get("_mode")})
+    return ", ".join([f"{g} gesture" for g in gestures] + [f"{m} session" for m in modes])
+
+
+def timing_advice(game_mu_ms: float, action: str) -> str:
+    """TIMING: advice from the game-clock bias, the clock that decides clear or crash."""
+    if abs(game_mu_ms) < 15:
+        return "Your timing is well centred on average."
+    return f"Try {action} about {abs(game_mu_ms):.0f} ms {'later' if game_mu_ms < 0 else 'sooner'}."
 
 
 def _flag(row: dict, key: str) -> bool:
@@ -170,15 +210,21 @@ def success_by_window(rows: Sequence[dict], fit: Optional[js.GaussianTiming]) ->
 
     Obstacles are grouped by the window width they were designed for
     (``target_w``).  If that column is empty, windows are rounded to 20 ms.
+    A staircase (``--progressive``) designs a new width for almost every
+    obstacle, which would give rows of one obstacle each; when groups average
+    fewer than 3 obstacles, equal-sized groups of neighbouring widths are used.
     """
+    measured = [r for r in rows if _num(r, "W") is not None]
     groups: dict[float, list[dict]] = {}
-    for r in rows:
-        w = _num(r, "W")
-        if w is None:
-            continue
+    for r in measured:
         key = _num(r, "target_w")
-        key = key if key is not None else round(w / 0.02) * 0.02
+        key = key if key is not None else round(_num(r, "W") / 0.02) * 0.02
         groups.setdefault(key, []).append(r)
+    if groups and len(measured) / len(groups) < 3:
+        ordered = sorted(measured, key=lambda r: _num(r, "W"))
+        k = max(3, min(7, len(ordered) // 4))         # same grouping as the HTML chart
+        chunks = [ordered[i * len(ordered) // k:(i + 1) * len(ordered) // k] for i in range(k)]
+        groups = {statistics.fmean(_num(r, "W") for r in c): c for c in chunks if c}
 
     table = []
     for key in sorted(groups, reverse=True):
@@ -250,6 +296,8 @@ def build_report(rows: Sequence[dict]) -> dict:
     print(" Jump timing report")
     print("=" * 64)
     print(f"Files: {', '.join(sources)}")
+    if session_label(rows):
+        print(f"Session: {session_label(rows)}")
 
     # --- 1 -----------------------------------------------------------
     _heading(1, "What was recorded")
@@ -303,11 +351,13 @@ def build_report(rows: Sequence[dict]) -> dict:
         se_sigma = sigma / math.sqrt(2 * (len(deltas) - 1))
         g_mu, g_sigma = mean_and_spread(game_deltas)
         fit = js.GaussianTiming(mu=g_mu, sigma0=g_sigma)     # predicts outcomes, so it uses the game clock
-        out.update(mu=mu, sigma=sigma, se_mu=se_mu, se_sigma=se_sigma, n_deltas=len(deltas))
-        direction = "late" if mu > 0 else "early"
+        out.update(mu=mu, sigma=sigma, se_mu=se_mu, se_sigma=se_sigma, n_deltas=len(deltas),
+                   game_mu=g_mu)
+        g_direction = "late" if g_mu > 0 else "early"
         print(f"Bias  : {_ms(mu)}  (about +-{se_mu * 1000:.0f} ms uncertainty)")
-        print(f"        On average you jump {abs(mu) * 1000:.0f} ms {direction} compared with "
-              "the middle of the safe window.")
+        print(f"        The game started your jumps {abs(g_mu) * 1000:.0f} ms {g_direction} on average, "
+              "compared with\n        the middle of the safe window. "
+              f"{timing_advice(g_mu * 1000, gesture_action(rows))}")
         print(f"Spread: {sigma * 1000:.0f} ms  (about +-{se_sigma * 1000:.0f} ms uncertainty)")
         print("        Roughly 2 out of 3 of your jumps land within this distance of your\n"
               "        own average.")
@@ -315,10 +365,10 @@ def build_report(rows: Sequence[dict]) -> dict:
         if dkey == "delta_open":
             pairs = [(_num(r, "delta"), _num(r, "delta_open")) for r in rows]
             shift = statistics.fmean(a - b for a, b in pairs if a is not None and b is not None)
-            print("Timing is when the camera first saw your gesture, minus half a camera frame,\n"
-                  "so the game's own wait is removed. The game then started your jumps\n"
-                  f"{shift * 1000:.0f} ms later on average, and that later time decides clear or crash\n"
-                  "(section 4 uses it).")
+            print("Bias and spread are timed from when the camera first saw your gesture,\n"
+                  "minus half a camera frame, so the game's own wait is removed. The game\n"
+                  f"then started your jumps {shift * 1000:.0f} ms later on average, and that later time\n"
+                  "decides clear or crash (the advice above and section 4 use it).")
         missing = n - len(deltas)
         if missing:
             print(f"Note: {missing} obstacles had no jump before they arrived. They are\n"

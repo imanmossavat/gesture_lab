@@ -62,6 +62,89 @@ The key numbers are **bias** (early or late?) and **spread** (how scattered?). B
 - Logs made before physics ran at a fixed 1/60 s are not comparable for tall obstacles; the header's `git_hash` says which code wrote a file.
 - CSV files are ignored by git, except in `data/valid/`: put sessions you want to keep there.
 
+## Example commands by use case
+
+Each block is complete: play, then build the analysis. Replace `alice` with the player's name.
+
+**Measure one player once** (fixed experiment, about 70 s):
+
+```bash
+python game.py --experiment --player alice --log-trials data/alice_open_1.csv
+python -m gesture_lab.analyze_trials data/alice_open_1.csv \
+    --plot data/alice_open_1.png --html data/alice_open_1.html
+```
+
+**Measure with the thumb gesture:**
+
+```bash
+python game.py --experiment --gesture thumb --player alice --log-trials data/alice_thumb_1.csv
+python -m gesture_lab.analyze_trials data/alice_thumb_1.csv \
+    --plot data/alice_thumb_1.png --html data/alice_thumb_1.html
+```
+
+**Compare open hand and thumb** (alternate the order, new seed each session, analyze each gesture on its own and compare the spreads):
+
+```bash
+python game.py --experiment --gesture open  --player alice --log-trials data/alice_open_1.csv
+python game.py --experiment --gesture thumb --player alice --log-trials data/alice_thumb_1.csv
+python game.py --experiment --gesture thumb --player alice --log-trials data/alice_thumb_2.csv
+python game.py --experiment --gesture open  --player alice --log-trials data/alice_open_2.csv
+python -m gesture_lab.analyze_trials data/alice_open_1.csv  data/alice_open_2.csv  --html data/alice_open.html
+python -m gesture_lab.analyze_trials data/alice_thumb_1.csv data/alice_thumb_2.csv --html data/alice_thumb.html
+```
+
+**Compare players fairly** (same seed, so everyone gets the same obstacle order; same preset):
+
+```bash
+python game.py --experiment --experiment-seed 42 --preset 2 --player alice --log-trials data/alice_seed42.csv
+python game.py --experiment --experiment-seed 42 --preset 2 --player bob   --log-trials data/bob_seed42.csv
+python -m gesture_lab.analyze_trials data/alice_seed42.csv --html data/alice_seed42.html
+python -m gesture_lab.analyze_trials data/bob_seed42.csv   --html data/bob_seed42.html
+```
+
+**A longer, more precise measurement** (6 blocks = 45 obstacles; or a slower game):
+
+```bash
+python game.py --experiment --experiment-blocks 6 --player alice --log-trials data/alice_long.csv
+python game.py --experiment --experiment-speed 350 --player alice --log-trials data/alice_350.csv
+python -m gesture_lab.analyze_trials data/alice_long.csv --plot data/alice_long.png --html data/alice_long.html
+```
+
+**Progressive challenge** (staircase per speed level; the HTML report adds a by-speed table):
+
+```bash
+python game.py --progressive --gesture thumb --player alice --log-trials data/alice_thumb_prog_1.csv
+python game.py --progressive --speed-step 40 --levels 4 --per-level 12 --player alice \
+    --log-trials data/alice_prog_long.csv
+python -m gesture_lab.analyze_trials data/alice_thumb_prog_1.csv \
+    --plot data/alice_thumb_prog_1.png --html data/alice_thumb_prog_1.html
+```
+
+**Keep sessions and pool them** (only `data/valid/*.csv` is tracked by git):
+
+```bash
+mkdir -p data/valid && cp data/alice_thumb_*.csv data/valid/
+python -m gesture_lab.analyze_trials data/valid/alice_thumb_*.csv --html data/alice_thumb_pooled.html
+```
+
+**Classic adaptive game with outcome and latency logs:**
+
+```bash
+python game.py --player alice --max-crashes 0 \
+    --log-outcomes data/alice_outcomes.csv --log-latency data/alice_latency.csv
+python -m gesture_lab.analyze data/alice_outcomes.csv --plot data/alice_outcomes.png
+python -m gesture_lab.analyze data/alice_latency.csv
+python -m gesture_lab.summarize data/alice_outcomes.csv --anon     # shareable text block, no raw rows
+```
+
+**No camera: learn the report or check the analysis** (a simulated player with a known bias and spread; the report should recover them):
+
+```bash
+python -m gesture_lab.simulate_experiment --mu 0.03 --sigma 0.05 --seed 1 --blocks 6 --out data/sim.csv
+python -m gesture_lab.analyze_trials data/sim.csv --plot data/sim.png --html data/sim.html
+python -m gesture_lab.report_html data/sim.csv --out data/sim_only.html    # the HTML report on its own
+```
+
 ## Troubleshooting
 
 - **No window:** it may be behind others; click its icon in the dock or taskbar.

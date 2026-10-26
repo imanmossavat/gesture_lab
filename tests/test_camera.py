@@ -48,7 +48,12 @@ def test_camera_can_read_frame():
 
 def test_frame_is_not_all_black():
     cap = cv2.VideoCapture(0)
-    ok, frame = cap.read()
+    # Cameras (macOS especially) return black frames until auto-exposure settles.
+    ok, frame = False, None
+    for _ in range(30):
+        ok, frame = cap.read()
+        if ok and np.mean(frame) > 1.0:
+            break
     cap.release()
     assert ok
     assert np.mean(frame) > 1.0
